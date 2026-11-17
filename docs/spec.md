@@ -1,6 +1,6 @@
 # godepot: specification
 
-Explanation and reference. Draft of 2026-11-16. Nothing in this page is built. The plan of the work, and the traps of other products with the way round each, are in [plan.md](plan.md).
+Explanation and reference. Draft of 2026-11-16. Of this page, the database package (D1 as an interface, D4), the blob layer (S1 to S4, over blobgate), the lease (O2) and a start of the program and its metrics (O4) are built: [blob-layer.md](blob-layer.md), [status.md](status.md). Nothing else is. The plan of the work, and the traps of other products with the way round each, are in [plan.md](plan.md).
 
 ## What it is
 
@@ -77,7 +77,7 @@ Each has a number so that the plan and the tests can name it. "Must" is needed f
 
 ### Storage
 
-- **S1** Every blob is kept in blobgate under the key `blobs/sha256/<2 hex>/<64 hex>`. The same bytes are kept once across all repositories and formats. (must)
+- **S1** Every blob is kept in blobgate under the key `blobs/sha256/<2 hex>/<64 hex>/<life>`, where `<life>` is random and new each time a digest that was collected comes back, so that a late delete of the old life cannot touch the new one ([blob-layer.md](blob-layer.md)). The same bytes are kept once across all repositories and formats. (must)
 - **S2** A blob is visible to a client only after its SHA-256 has been checked against what the client or the upstream named. An upload of unknown digest (an OCI chunked upload) goes to `uploads/<id>` and is made the blob by blobgate's `?link` (the store has `dedup: "tenant"`), sending nothing twice. (must)
 - **S3** The record in the database is the commit, as in blobgate: a blob with no reference is a stray and is removed; a reference with no blob cannot exist, because the reference is written after the blob is checked. (must)
 - **S4** Space is freed by one mechanism with no task to schedule: when the last reference goes, the blob is queued; after a grace time (default 24 hours, so that a push in progress that is about to name it is safe) it is deleted from blobgate. The collector runs while the service serves. (must)
@@ -179,8 +179,9 @@ A format is done when the real client passes the conformance script of the plan 
 | `repositories` | name, format, kind, settings version |
 | `components` | repository, namespace, name, version, format fields, created by, created at, last read (day), deleted at |
 | `assets` | component, path, blob digest, size, content type, the digests a format needs (sha1, md5, sha512) |
-| `blobs` | digest, size, reference count, unreferenced since |
-| `refs` | blob digest, owner (an asset, an upload, a publication) |
+| `blobs` | digest, size, key, state (incoming, live), unreferenced since |
+| `refs` | owner (an asset, an upload, a publication), blob digest |
+| `uploads`, `graves` | bytes being taken in; keys of the store that are to be deleted |
 | `tags` | repository, name, the manifest it names (OCI tags, npm dist-tags) |
 | `links` | from manifest, to manifest (an index and its children; a subject and its referrers) |
 | `documents` | repository, path, body up to 256 KiB, validators (packuments, metadata, cached upstream indexes) |

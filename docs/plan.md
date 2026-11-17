@@ -1,6 +1,6 @@
 # godepot: plan
 
-Explanation. Draft of 2026-11-16. Nothing here is built or run. The requirements (S1, R3, P6, ...) are those of [spec.md](spec.md).
+Explanation. Draft of 2026-11-16. Step 2 (the blob layer) and most of step 1 (the skeleton) are built and run against a real rqlite and a real blobgate; [status.md](status.md) says what, and what is not. Steps 0, 3 and the rest are not done (of step 0, the 2 GiB and the real-blobgate runs are). The requirements (S1, R3, P6, ...) are those of [spec.md](spec.md).
 
 The plan has two halves: the steps, each with what proves it is done, and the traps of other products, each with the way round it and the step that proves the way round works.
 
@@ -44,7 +44,7 @@ The order inside the plan follows the risk: the steps that can show the design w
 |---|---|---|---|---|
 | T1 | Deleting frees nothing. A cleanup policy only marks; for Docker a second task removes unused manifests; a third ("compact blob store") frees the disk; blobs with no record are seen by none of them | Nexus; checked (the documented order is: delete incomplete uploads, cleanup, delete unused manifests, compact; forum reports of blobs that no task finds) | S3, S4: one count of references kept in the transaction that writes or removes; one collector; strays found by listing blobgate against the records | step 2 |
 | T2 | Garbage collection needs the registry stopped or read-only | Distribution; Harbor before 2.1; checked for Harbor (read-only in 2.0, while serving since 2.1) | S4: the collector deletes only blobs unreferenced for longer than the grace time, and takes the reference count in a transaction, so a push needs no lock | step 2 (the race test) |
-| T3 | The collector removes a layer that a push in progress is about to name | every mark-and-sweep registry; memory | an upload holds a reference from its first byte; a blob younger than the grace time is never removed | step 2 |
+| T3 | The collector removes a layer that a push in progress is about to name | every mark-and-sweep registry; memory | a reference is added only in one transaction with the check that the blob is live, and a blob is removed only in one transaction with the check that nothing names it; the side that loses is refused whole and the client sends the bytes; a blob unnamed for less than the grace time is never removed | step 2 (built: `TestRaceOfPushAndCollect`, `TestRaceOfHoldAndCollect`, `TestALateDeleteDoesNotRemoveABlobThatCameBack`) |
 | T4 | An index image loses a child, or a signature loses its subject, in cleanup; untagged manifests pile up, or deleting them breaks signed images | Harbor (deleting untagged is a switch; an issue reports signatures blocking it); checked | C5: `links` rows; a manifest goes only when no tag, no index and no subject needs it, and its referrers go with it | step 4 |
 | T5 | Two files per blob on a disk (bytes and properties): inodes run out, backups crawl | Nexus file blob store; memory | S5, S6: nothing on a local disk; properties are rows | step 2 |
 | T6 | The trash or the cache of a proxy grows unseen until the disk is full | Artifactory (trash can, remote caches); memory | the trash has an end date (C3); a proxy repository takes a cleanup policy and a quota like any other; a metric and the page show bytes per repository, in trash, awaiting collection | step 7 |
