@@ -11,6 +11,7 @@ Every page is of one kind (Diátaxis). The README at the root is the way in.
 | [blob-layer.md](blob-layer.md) | explanation | what happens to bytes, and what a crash leaves |
 | [spec.md](spec.md) | explanation and reference | what godepot is to be: the requirements, the data model, what it needs of blobgate |
 | [plan.md](plan.md) | explanation | the steps with their proofs, and the traps of other products with the way round each |
+| [step0-probes.md](step0-probes.md) | record | what was asked of blobgate in step 0, what it answered, what was not run |
 | [status.md](status.md) | record | what is built, what is not, what was run |
 
 A setting, a metric, a command or an exit code that the program has and its page does not mention fails `go test ./cmd/godepot` (`docs_test.go`).

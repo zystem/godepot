@@ -16,7 +16,7 @@ The plan has two halves: the steps, each with what proves it is done, and the tr
 
 | # | Step | Gives | Proof that it is done |
 |---|---|---|---|
-| 0 | **Probe blobgate** (a week, no product code) | the gaps of blobgate known before anything stands on them | a 10 GiB object written in 8 MiB parts and made a blob by `?link`; 200 slow readers of ranges with the memory measured; 1 million small objects listed; `kill -9` between upload and link. Findings go to blobgate's issues; this plan is corrected |
+| 0 | **Probe blobgate** (done 2026-11-17: [step0-probes.md](step0-probes.md)) | the gaps of blobgate known before anything stands on them | a 10 GiB object written in 8 MiB parts and made a blob by `?link`; 200 slow readers of ranges with the memory measured; 1 million small objects listed; `kill -9` between upload and link. Findings go to blobgate's issues; this plan is corrected |
 | 1 | **Skeleton** | the program, the settings file and `validate`, the database package and the schema, the lease, metrics, the audit log, the try-it | the README try-it run by a test; a setting without a line in its page fails the build |
 | 2 | **The blob layer** | S1 to S6: blobs by digest, references, the collector with its grace time, `verify`, the trash | a crash at every step of a write and of a delete leaves nothing unknown (blobgate's `TestCrashAtEveryStep`, one level up); a push and the collector racing 10 000 times lose no blob; **the ceiling of rqlite measured** (D2) and the decision on PostgreSQL taken |
 | 3 | **raw, hosted** + accounts and tokens | the smallest format end to end; A1 (local), A2, A4, A6; R4, R6, R7 | `curl` puts, reads a range, lists; a token out of scope is refused and audited |
@@ -105,7 +105,7 @@ The order inside the plan follows the risk: the steps that can show the design w
 | # | Trap | The way round | Proved in |
 |---|---|---|---|
 | T38 | rqlite has one writer; a registry of millions of components may ask more of it than blobgate does | D2: measure in step 2, before any format is built on it; the database behind one package | step 2 |
-| T39 | blobgate holds an 8 MiB block per read (4 at once by default): many slow pulls of large layers queue | measured in step 0; if it queues, either blobgate streams (its roadmap item 2) or downloads go by presigned redirect (S7) | step 0 |
+| T39 | blobgate holds an 8 MiB block per read: many slow pulls of large layers were feared to queue | **measured 2026-11-17 ([step0-probes.md](step0-probes.md)): they do not queue, they cost about 10 MiB of blobgate's memory each, kept (562 MiB with 50 readers, 5 GiB with 500).** Way round: godepot limits the downloads going on at once and ends a read slower than a minimum rate; the sizing says 10 MiB per open download; blobgate streaming a block (its roadmap item 2) removes the cost. The presigned redirect does not help | step 4 (a test with slow clients against godepot) |
 | T40 | Many small files are slow on FTP and WebDAV nodes | S5: small documents are rows | step 2 |
 | T41 | Writing a format for every ecosystem at once, none finished (the reason "universal" managers are large) | tiers; a format is released only when its script passes for hosted, proxy and group | step 6 |
 | T42 | Two maintainers: more surface than can be kept safe | no plugins, no scripting, no page that writes; tier 3 only on request | the spec's "Does not do" |

@@ -114,6 +114,7 @@ Each has a number so that the plan and the tests can name it. "Must" is needed f
 - **P8** An upstream has its own credentials (sealed in the database), its own limits (requests per second, at once), and its own trust: `verify` says what is checked (the digest the upstream names, a signature where the format has one). Credentials are never sent after a redirect to another host. (must)
 - **P9** The address of an upstream is set by the operator only. A fetch refuses private and link-local addresses after resolving the name, unless the upstream says `allow_private: true`. (must)
 - **P10** A scanner is a program godepot calls with a blob (or to which it gives a presigned address) and that answers with a report; a policy maps the report to "serve", "warn" or "refuse". A scanner that is down: the policy says `fail_open` or `fail_closed` (default open for cached content, closed for new). (should)
+- **P11** Downloads of blobs going on at once are limited (a setting; the default is chosen from the memory of blobgate, about 10 MiB for each), a download over the limit waits for a short time and then gets 503 with `Retry-After`, and a download that goes slower than a minimum rate for a time is ended. (must)
 
 ### Formats
 
@@ -201,8 +202,8 @@ Checked against blobgate 0.6.0 on 2026-11-16 by reading its documents; none of i
 | Need | In blobgate today | Gap |
 |---|---|---|
 | write a blob of unknown size and digest in parts | uploads in parts of at most 8 MiB, all but the last of one size | none; godepot cuts the stream into 8 MiB parts itself |
-| make `blobs/sha256/..` from an upload without sending it again | `?link` with `{sha256, size}`, store with `dedup: "tenant"` | none expected; step 0 proves it for a 10 GiB object |
-| read a range | yes | a read holds a block (8 MiB) in memory, 4 at once by default: step 0 measures many slow readers |
+| make `blobs/sha256/..` from an upload without sending it again | `?link` with `{sha256, size}`, store with `dedup: "tenant"` | none: run for a 10 GiB object on one local node ([step0-probes.md](step0-probes.md)) |
+| read a range | yes | a read holds a block (8 MiB) in memory, **kept for as long as the client is slow**: about 10 MiB of blobgate for each download going on (measured, [step0-probes.md](step0-probes.md)); godepot limits downloads (P11 below) |
 | trash and restore | `soft_delete_seconds`, `?restore`, `?purge` | none |
 | quota of the whole instance | per tenant and store | none; quotas per repository are godepot's own |
 | presigned reads (S7) | the S3 door, up to 7 days | optional |
