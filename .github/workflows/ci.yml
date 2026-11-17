@@ -1,0 +1,82 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+env:
+  # renovate: datasource=docker depName=rqlite/rqlite
+  RQLITE_IMAGE: rqlite/rqlite:10.5.1
+  # renovate: datasource=docker depName=ghcr.io/zystem/blobgate
+  BLOBGATE_IMAGE: ghcr.io/zystem/blobgate:0.6.1
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - name: "tests, with a real rqlite and a real blobgate (tools/test/blobgate-stand.sh); one package at a time, they share a database"
+        run: |
+          eval "$(tools/test/blobgate-stand.sh start)"
+          go test -race -count=1 -p 1 -coverpkg=./cmd/godepot,./internal/... -coverprofile=cover.out ./...
+      - name: Statement coverage must stay at 80% or more
+        run: |
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "statement coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit !(t + 0 >= 80) }' || { echo "::error::statement coverage ${total}% is below 80%"; exit 1; }
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # staticcheck with all its checks, and gosec without G104 (unchecked errors: the best-effort cleanups and closes are on purpose, each with its reason in the code)
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
+      - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-generated ./...
+
+  reproducible:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: the same source gives the same bytes
+        run: |
+          for arch in amd64 arm64; do
+            for i in 1 2; do
+              CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=ci" -o "/tmp/godepot-$arch-$i" ./cmd/godepot
+            done
+            a=$(sha256sum "/tmp/godepot-$arch-1" | cut -d' ' -f1); b=$(sha256sum "/tmp/godepot-$arch-2" | cut -d' ' -f1)
+            echo "$arch: $a $b"
+            [ "$a" = "$b" ] || { echo "::error::the build for $arch is not repeatable"; exit 1; }
+          done
+
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: build for both platforms (not pushed) and run it read-only
+        run: |
+          docker buildx create --use --driver docker-container >/dev/null
+          docker buildx build --platform linux/amd64,linux/arm64 -t godepot:ci .
+          docker buildx build --platform linux/amd64 --load -t godepot:ci .
+          docker run --rm --read-only --cap-drop ALL godepot:ci version
