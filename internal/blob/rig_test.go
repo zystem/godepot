@@ -17,6 +17,7 @@ import (
 	"github.com/zystem/godepot/internal/blob"
 	"github.com/zystem/godepot/internal/blobgate"
 	"github.com/zystem/godepot/internal/meta"
+	"github.com/zystem/godepot/internal/testutil"
 )
 
 // memStore is a Store in memory that links as blobgate does with dedup "tenant": a key can be made from bytes that another key holds.
@@ -150,10 +151,8 @@ func newRig(t *testing.T) *rig {
 	}
 	ctx := context.Background()
 	db := meta.NewRqlite(url)
-	for _, table := range []string{"schema_steps", "guard", "blobs", "refs", "uploads", "graves", "lease"} {
-		if _, err := db.Exec(ctx, meta.S("DROP TABLE IF EXISTS "+table)); err != nil {
-			t.Fatal(err)
-		}
+	if err := testutil.Reset(ctx, db); err != nil {
+		t.Fatal(err)
 	}
 	if err := meta.Migrate(ctx, db); err != nil {
 		t.Fatal(err)

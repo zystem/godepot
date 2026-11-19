@@ -330,3 +330,9 @@ func (l *Layer) dig(ctx context.Context, key string) error {
 	_, err := l.DB.Exec(ctx, meta.S(`DELETE FROM graves WHERE key = ?`, key))
 	return err
 }
+
+// SumHex is the SHA-256 of the bytes, in hex: the digest of a blob.
+func SumHex(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}

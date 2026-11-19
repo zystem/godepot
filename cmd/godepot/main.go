@@ -1,4 +1,5 @@
-// godepot is a repository manager on top of blobgate. This release has the blob layer and the background work (docs/blob-layer.md); no format is served yet (docs/spec.md, docs/plan.md).
+// godepot is a repository manager on top of blobgate. This release has the blob layer and the background work (docs/blob-layer.md), accounts and tokens, and one format, raw (docs/raw.md); docs/spec.md
+// and docs/plan.md say what comes next.
 package main
 
 import (
@@ -17,19 +18,27 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zystem/godepot/internal/audit"
+	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/blob"
 	"github.com/zystem/godepot/internal/blobgate"
+	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/lease"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/raw"
+	"github.com/zystem/godepot/internal/server"
+	"github.com/zystem/godepot/internal/settings"
 )
 
 var version = "dev"
 
 const usage = `usage: godepot <command>
 
-  serve        run: migrate the database, do the background work while holding the lease, answer /healthz and /readyz
-  validate     check the settings, and that the database and blobgate can be used (writes nothing that stays)
+  serve        run: migrate the database, serve the repositories and the API, do the background work while holding the lease
+  validate     check the settings and the settings file, and that the database and blobgate can be used (writes nothing that stays)
+  new-account  make an account: new-account NAME [-robot] [-admin]
+  new-token    make a token and print it once: new-token ACCOUNT -life 720h -repositories files -actions read,write [-paths 'releases/**']
   migrate      bring the schema of the database to the one this program writes, and stop
   check        try the store: a write of unknown length, a link, a range, a listing, a delete
   reconcile    compare the store with the database; with -fix, remove the keys that nothing names
@@ -60,7 +69,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
-	case "serve", "validate", "migrate", "check", "reconcile":
+	case "serve", "validate", "migrate", "check", "reconcile", "new-account", "new-token":
 	default:
 		fmt.Fprintf(stderr, "godepot: no command %q\n\n%s", cmd, usage)
 		return exitUsage
@@ -68,11 +77,35 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fix := fs.Bool("fix", false, "reconcile: remove the keys that nothing names (without it nothing is removed)")
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	robot := fs.Bool("robot", false, "new-account: a robot (an account for a program), not a user")
+	admin := fs.Bool("admin", false, "new-account: an admin account (every action on every repository; its tokens still have their own scope)")
+	life := fs.Duration("life", 0, "new-token: how long the token lives, like 720h (required; at most GODEPOT_TOKEN_MAX_DAYS)")
+	repos := fs.String("repositories", "", "new-token: the repositories (or patterns) the token is for, separated by commas")
+	paths := fs.String("paths", "", "new-token: the paths (patterns) the token is for, separated by commas; none is every path")
+	acts := fs.String("actions", "", "new-token: what the token may do: read, write, delete, promote, admin, separated by commas")
+	note := fs.String("note", "", "new-token: a note for the list of tokens")
+	// flags may follow the name, as in `new-account ci-build -robot`
+	var rest []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return exitUsage
+		}
+		if fs.NArg() == 0 {
+			break
+		}
+		rest = append(rest, fs.Arg(0))
+		args = fs.Args()[1:]
 	}
 	if *fix && cmd != "reconcile" {
 		fmt.Fprintln(stderr, "godepot: -fix is for reconcile")
+		return exitUsage
+	}
+	if cmd != "new-account" && cmd != "new-token" && len(rest) > 0 {
+		fmt.Fprintf(stderr, "godepot: %s takes no arguments (it has %q)\n", cmd, rest[0])
+		return exitUsage
+	}
+	if (cmd == "new-account" || cmd == "new-token") && len(rest) != 1 {
+		fmt.Fprintf(stderr, "godepot: %s takes the name of one account\n\n%s", cmd, usage)
 		return exitUsage
 	}
 	cfg, err := loadConfig(env)
@@ -102,6 +135,21 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		}
 	case "serve":
 		rerr = a.serve(ctx)
+	case "new-account":
+		if rerr = a.start(ctx, false); rerr == nil {
+			kind := "user"
+			if *robot {
+				kind = "robot"
+			}
+			if rerr = a.auth.CreateAccount(ctx, rest[0], kind, *admin); rerr == nil {
+				a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "account.create", Result: audit.OK, Detail: rest[0] + " " + kind})
+				fmt.Fprintf(stdout, "account %s (%s) made\n", rest[0], kind)
+			}
+		}
+	case "new-token":
+		if rerr = a.start(ctx, false); rerr == nil {
+			rerr = a.newToken(ctx, rest[0], *life, splitList(*repos), splitList(*paths), splitList(*acts), *note)
+		}
 	}
 	if rerr != nil {
 		fmt.Fprintf(stderr, "godepot %s: %v\n", cmd, rerr)
@@ -112,8 +160,18 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 
 func indent(s string) string { return "  " + strings.ReplaceAll(s, "\n", "\n  ") }
 
+func splitList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}
+
 type app struct {
 	cfg    *Config
+	auth   *auth.Store
+	audit  *audit.Log
+	srv    *server.Server
 	db     *meta.Rqlite
 	store  *blobgate.Store
 	layer  *blob.Layer
@@ -127,6 +185,8 @@ type app struct {
 
 type appMetrics struct {
 	passes, passErrors, collected *metrics.Counter
+	reads, writes, deletes        *metrics.Counter
+	refused                       *metrics.Counter
 	leader, up                    *metrics.Gauge
 }
 
@@ -137,12 +197,22 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		passes:     reg.Counter("godepot_collect_passes_total", "Passes of the collector that this replica made while holding the lease.", ""),
 		passErrors: reg.Counter("godepot_collect_errors_total", "Passes of the collector that ended with an error.", ""),
 		collected:  reg.Counter("godepot_collected_total", "Things the collector removed, by kind: graves (keys deleted from the store), uploads (swept), blobs (nothing named them).", "kind"),
+		reads:      reg.Counter("godepot_reads_total", "Files read, by repository.", "repo"),
+		writes:     reg.Counter("godepot_writes_total", "Files written (new or changed), by repository.", "repo"),
+		deletes:    reg.Counter("godepot_deletes_total", "Files deleted, by repository.", "repo"),
+		refused:    reg.Counter("godepot_refused_total", "Requests refused, by reason: unauthenticated, forbidden, conflict (a file is immutable), quota, digest (the bytes were not the ones named).", "reason"),
 		leader:     reg.Gauge("godepot_leader", "1 while this replica holds the lease of the background work, else 0."),
 		up:         reg.Gauge("godepot_up", "1 while the program is running."),
 	}
 	a.db = meta.NewRqlite(cfg.RqliteURL)
 	a.store = blobgate.New(cfg.BlobgateURL, cfg.Tenant, cfg.Secret, cfg.Store)
 	a.layer = &blob.Layer{DB: a.db, Store: a.store, Grace: cfg.Grace, UploadTTL: cfg.UploadTTL}
+	a.auth = &auth.Store{DB: a.db, MaxLife: cfg.TokenMaxLife}
+	a.audit = &audit.Log{DB: a.db, Log: a.log}
+	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
+		"raw": &raw.Raw{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused},
+	}}
+	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte
 	_, _ = rand.Read(rnd[:])
 	host, _ := os.Hostname()
@@ -185,8 +255,39 @@ func (a *app) start(ctx context.Context, checkStore bool) error {
 	return nil
 }
 
+// loadSettings reads the settings file (if there is one) and gives it to the server.
+func (a *app) loadSettings() error {
+	if a.cfg.ConfigFile == "" {
+		return nil
+	}
+	set, err := settings.Load(a.cfg.ConfigFile)
+	if err != nil {
+		return err
+	}
+	a.srv.Settings.Store(set)
+	return nil
+}
+
+func (a *app) newToken(ctx context.Context, account string, life time.Duration, repos, paths, acts []string, note string) error {
+	tok, info, err := a.auth.CreateToken(ctx, account, []auth.Grant{{Repositories: repos, Paths: paths, Actions: acts}}, life, note)
+	if err != nil {
+		return err
+	}
+	a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "token.create", Result: audit.OK, Detail: info.ID + " for " + account})
+	fmt.Fprintf(a.errOut, "token %s for %s, valid until %s. This is the only time it is shown; it is not kept.\n", info.ID, account, time.Unix(info.Expires, 0).UTC().Format(time.RFC3339))
+	fmt.Fprintln(a.out, tok)
+	return nil
+}
+
 func (a *app) validate(ctx context.Context) error {
 	fmt.Fprintln(a.out, "settings: ok")
+	if a.cfg.ConfigFile != "" {
+		if err := a.loadSettings(); err != nil {
+			return err
+		}
+		set := a.srv.Settings.Load()
+		fmt.Fprintf(a.out, "settings file: ok (%d repositories, %d grants)\n", len(set.Repositories), len(set.Grants))
+	}
 	if _, err := a.db.Query(ctx, meta.S("SELECT 1")); err != nil {
 		return fmt.Errorf("the database does not answer: %w", err)
 	}
@@ -224,10 +325,31 @@ func (a *app) reconcile(ctx context.Context, dry bool) int {
 }
 
 func (a *app) serve(ctx context.Context) error {
+	if err := a.loadSettings(); err != nil {
+		return err
+	}
 	if err := a.start(ctx, true); err != nil {
 		return err
 	}
 	a.m.up.Set(1)
+	// SIGHUP reads the settings file again; a file that is not right is refused and the settings in use stay.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				if err := a.loadSettings(); err != nil {
+					a.log.Error("the settings file was not read again; the settings in use stay", "error", err.Error())
+				} else {
+					a.log.Info("the settings file was read again")
+				}
+			}
+		}
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +363,14 @@ func (a *app) serve(ctx context.Context) error {
 		}
 		fmt.Fprint(w, `{"checks":{"database":"ok"},"status":"ready"}`)
 	})
-	servers := []*http.Server{{Addr: fmt.Sprintf(":%d", a.cfg.Port), Handler: mux, ReadHeaderTimeout: 10 * time.Second}}
+	door := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if server.Handles(r.URL.Path) { // before the mux, which would send a path with "//" in it to another address
+			a.srv.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+	servers := []*http.Server{{Addr: fmt.Sprintf(":%d", a.cfg.Port), Handler: door, ReadHeaderTimeout: 10 * time.Second}}
 	if a.cfg.MetricsPort != 0 {
 		mm := http.NewServeMux()
 		mm.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {

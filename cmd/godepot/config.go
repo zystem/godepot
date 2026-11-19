@@ -24,6 +24,10 @@ type Config struct {
 	CollectEvery time.Duration
 	CollectBatch int
 	LeaseTTL     time.Duration
+	// ConfigFile is the settings file (repositories, grants); "" is none: then no repository is served.
+	ConfigFile string
+	// TokenMaxLife is the longest life a token may have.
+	TokenMaxLife time.Duration
 }
 
 // getenv reads NAME, or the contents of the file that NAME_FILE names (a secret kept out of the environment of the process). Both set is an error.
@@ -101,6 +105,8 @@ func loadConfig(env func(string) string) (*Config, error) {
 	c.CollectEvery = secs("GODEPOT_COLLECT_SECONDS", 60, 1)
 	c.LeaseTTL = secs("GODEPOT_LEASE_SECONDS", 120, 10)
 	c.CollectBatch = num("GODEPOT_COLLECT_BATCH", 200, 1)
+	c.ConfigFile = env("GODEPOT_CONFIG_FILE")
+	c.TokenMaxLife = time.Duration(num("GODEPOT_TOKEN_MAX_DAYS", 90, 1)) * 24 * time.Hour
 	if c.LeaseTTL > 0 && c.CollectEvery > 0 && c.LeaseTTL < 2*c.CollectEvery {
 		add(fmt.Errorf("GODEPOT_LEASE_SECONDS (%d) is less than twice GODEPOT_COLLECT_SECONDS (%d): the lease would run out between two renewals", c.LeaseTTL/time.Second, c.CollectEvery/time.Second))
 	}

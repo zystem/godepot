@@ -1,6 +1,6 @@
 # Configuration
 
-Reference. The environment variables and the commands of the program as they are in this release (2026-11-17). godepot reads no file of settings yet: repositories, upstreams, policies and roles (spec O1) come with the formats. Every change of a variable needs a **restart** of the replica.
+Reference. The environment variables and the commands of the program as they are in this release (2026-11-19). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A change of a variable needs a **restart** of the replica; a change of the file needs a restart or a `SIGHUP`.
 
 ## Settings
 
@@ -13,7 +13,9 @@ A secret may be given as `NAME` or as `NAME_FILE` (the path of a file whose cont
 | `GODEPOT_BLOBGATE_TENANT` | **required** | The tenant of blobgate that godepot writes as. One instance of godepot is one tenant; two instances share nothing when they have two. |
 | `GODEPOT_BLOBGATE_SECRET`, `GODEPOT_BLOBGATE_SECRET_FILE` | **required** (at least 16 characters) | The secret of that tenant (blobgate's `BLOBGATE_TENANTS`). |
 | `GODEPOT_BLOBGATE_STORE` | `_default` | The store of blobgate that holds the bytes (`_default` is the one marked default). It must be set to `dedup: "tenant"`: godepot makes the key of a blob from the bytes of an upload by a link, and `validate` and `serve` stop with a message when the store cannot link. |
-| `GODEPOT_PORT` | `18100` | The port of `/healthz` and `/readyz`. Plain HTTP; TLS is not served yet. |
+| `GODEPOT_PORT` | `18100` | The port of everything but `/metrics`: `/healthz`, `/readyz`, the repositories (`/repository/...`, [raw.md](raw.md)) and the API (`/api/v1/...`, [api.md](api.md)). Plain HTTP; TLS is not served yet, so put it behind a proxy that does, or on a network no one else can reach: **tokens are sent in the clear otherwise**. |
+| `GODEPOT_CONFIG_FILE` | none | The path of the settings file ([settings-file.md](settings-file.md)). With none, no repository is served and only the API of accounts answers. A file that is not right stops `serve` and `validate`; on `SIGHUP` it is read again and a file that is not right is refused (the settings in use stay, an error is logged). |
+| `GODEPOT_TOKEN_MAX_DAYS` | `90` (at least 1) | The longest life a token may be given. A token always has an end date; asking for more is refused. |
 | `GODEPOT_METRICS_PORT` | `0` (off) | A port that serves `/metrics` with no token. **Dangerous** when it can be reached from outside the cluster: it shows how much is collected and whether the replica leads. |
 | `GODEPOT_GRACE_SECONDS` | `86400` (24 hours; at least 60) | How long a blob that nothing names is kept before the collector removes it. It must be longer than the longest time between a client learning that a blob exists and committing what names it, and longer than a read of a blob lasts: [blob-layer.md](blob-layer.md). |
 | `GODEPOT_UPLOAD_TTL_SECONDS` | `86400` (at least 60) | An upload that has not ended after this is swept: its bytes are removed. It must be longer than the slowest upload. |
@@ -27,14 +29,16 @@ A wrong value is refused at start with every problem named at once.
 
 | Command | What it does |
 |---|---|
-| `godepot serve` | Waits for the database, brings its schema up to date, tries the store, then serves `/healthz` and `/readyz` and, while it holds the lease, does the background work. `SIGTERM` or `SIGINT` lets go of the lease and ends. |
-| `godepot validate` | Checks the settings, that the database answers and that the store can be used (writes a test object of its own and removes it). Prints `settings: ok`, `database: ok`, `store: ok`, or what is wrong. |
+| `godepot serve` | Reads the settings file, waits for the database, brings its schema up to date, tries the store, then serves the repositories, the API, `/healthz` and `/readyz` and, while it holds the lease, does the background work. `SIGHUP` reads the settings file again. `SIGTERM` or `SIGINT` lets go of the lease and ends. |
+| `godepot validate` | Checks the settings, the settings file (when `GODEPOT_CONFIG_FILE` is set), that the database answers and that the store can be used (writes a test object of its own and removes it). Prints `settings: ok`, then `settings file: ok (N repositories, M grants)` when there is a file, `database: ok`, `store: ok`, or what is wrong. |
 | `godepot migrate` | Brings the schema of the database to the one this program writes, and stops. A database whose schema is newer than the program is refused. |
 | `godepot check` | Tries the store: a write of unknown length, a link of the same bytes to a second key, a read of a range, a listing, a delete. |
 | `godepot reconcile` | Compares the store with the database. Without `-fix` nothing is changed. With `-fix` the keys that nothing names and that are older than the grace time are removed. Live blobs whose bytes are gone are listed (the first 20) and are **not** repaired: that data is lost and only a restore of the store brings it back. |
+| `godepot new-account NAME` | Makes an account (after bringing the schema up to date). `-robot` makes a robot, not a user; `-admin` makes an admin account. The name is 1 to 63 of `a-z 0-9 . _ -`, no `$`. An account has no password: it gets in with tokens. This is how the first admin is made, since the API needs a token. |
+| `godepot new-token ACCOUNT` | Makes a token for the account and prints **only the token** on the standard output (the rest, including the end date, goes to the standard error). It is shown once and not kept. `-life` (required, like `720h`, at most `GODEPOT_TOKEN_MAX_DAYS`), `-repositories` and `-actions` (required, comma separated), `-paths` (patterns, none is every path), `-note`. One scope per call; the API makes tokens with more than one. |
 | `godepot version` | Prints the version. |
 
-`-fix` is for `reconcile` only.
+`-fix` is for `reconcile` only. `-robot` and `-admin` are for `new-account`; `-life`, `-repositories`, `-paths`, `-actions` and `-note` are for `new-token`. Both commands write the audit log (the actor is `cli`).
 
 ## Exit codes
 
@@ -49,8 +53,10 @@ A wrong value is refused at start with every problem named at once.
 
 | Path | Answer |
 |---|---|
+| `/repository/<repository>/<path>` | the files of a repository: [raw.md](raw.md) |
+| `/api/v1/...` | accounts, tokens, the audit log, the settings: [api.md](api.md) |
 | `GET /healthz` | `ok` while the process runs |
 | `GET /readyz` | `{"checks":{"database":"ok"},"status":"ready"}`, or 503 with `"database":"fail"` |
 | `GET /metrics` (on `GODEPOT_METRICS_PORT` only) | [metrics.md](metrics.md) |
 
-No format is served in this release.
+The format `raw` is the only one served in this release.

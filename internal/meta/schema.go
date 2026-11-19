@@ -53,6 +53,68 @@ var steps = [][]string{
 			until INTEGER NOT NULL
 		) WITHOUT ROWID`,
 	},
+	// 3: accounts and tokens (internal/auth), components and assets (the formats), the audit log (internal/audit).
+	3: {
+		// An account is a user or a robot. It has no password: it gets in with tokens. admin is every action on every repository (a token still has its own scope).
+		`CREATE TABLE accounts (
+			name TEXT PRIMARY KEY,
+			kind TEXT NOT NULL CHECK (kind IN ('user', 'robot')),
+			admin INTEGER NOT NULL DEFAULT 0,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		) WITHOUT ROWID`,
+		// A token: id is public (it is in the token and in the audit log); only the SHA-256 of the secret part is kept. scope is a JSON list of {repositories, paths, actions}.
+		`CREATE TABLE tokens (
+			id TEXT PRIMARY KEY,
+			account TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			note TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL,
+			revoked_at INTEGER
+		) WITHOUT ROWID`,
+		`CREATE INDEX tokens_account ON tokens (account)`,
+		// A component is one version of one package; for the format raw, one file: name is its path and version is empty. props is a JSON object of text values.
+		`CREATE TABLE components (
+			id TEXT PRIMARY KEY,
+			repo TEXT NOT NULL,
+			namespace TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL,
+			version TEXT NOT NULL DEFAULT '',
+			props TEXT NOT NULL DEFAULT '{}',
+			created_by TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			UNIQUE (repo, namespace, name, version)
+		) WITHOUT ROWID`,
+		// An asset names a blob. Its id is the owner of the reference ('asset:<id>'): a new id for every write, so that an overwrite lets go of the old bytes and takes the new in one list.
+		`CREATE TABLE assets (
+			id TEXT PRIMARY KEY,
+			component_id TEXT NOT NULL,
+			repo TEXT NOT NULL,
+			path TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			content_type TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			UNIQUE (repo, path)
+		) WITHOUT ROWID`,
+		`CREATE INDEX assets_component ON assets (component_id)`,
+		// The audit log: one row for every write, delete, change of accounts and tokens, and refusal.
+		`CREATE TABLE audit (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			at INTEGER NOT NULL,
+			actor TEXT NOT NULL,
+			token TEXT NOT NULL DEFAULT '',
+			remote TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL,
+			repo TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			result TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX audit_at ON audit (at)`,
+	},
 }
 
 // Version is the number of the schema this program writes.

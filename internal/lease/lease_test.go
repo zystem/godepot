@@ -11,6 +11,7 @@ import (
 
 	"github.com/zystem/godepot/internal/lease"
 	"github.com/zystem/godepot/internal/meta"
+	"github.com/zystem/godepot/internal/testutil"
 )
 
 type clock struct{ t atomic.Int64 }
@@ -26,10 +27,8 @@ func setup(t *testing.T) (meta.DB, *clock) {
 	}
 	db := meta.NewRqlite(url)
 	ctx := context.Background()
-	for _, table := range []string{"schema_steps", "guard", "blobs", "refs", "uploads", "graves", "lease"} {
-		if _, err := db.Exec(ctx, meta.S("DROP TABLE IF EXISTS "+table)); err != nil {
-			t.Fatal(err)
-		}
+	if err := testutil.Reset(ctx, db); err != nil {
+		t.Fatal(err)
 	}
 	if err := meta.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
