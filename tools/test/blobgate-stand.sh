@@ -11,26 +11,40 @@ rq=24801 bg_rq=24802 port=24803
 rqlite="${RQLITE_IMAGE:-rqlite/rqlite}"
 
 wait_for() { for _ in $(seq 90); do curl -sf "$1" >/dev/null && return 0; sleep 0.5; done; echo "blobgate-stand: $1 does not answer" >&2; return 1; }
+# GODEPOT_STAND_BLOBGATE_ENV: more settings for blobgate, space separated (BLOBGATE_THREADS=64)
 env_for_blobgate=(BLOBGATE_RQLITE_URL="http://127.0.0.1:$bg_rq" BLOBGATE_PORT="$port" BLOBGATE_SHIM_PORT=0
-  BLOBGATE_TENANTS="$tenant=$secret" BLOBGATE_ADMIN_TOKEN="$admin" BLOBGATE_SEAL_KEY=a-seal-key-16-chars-long)
+  BLOBGATE_TENANTS="$tenant=$secret" BLOBGATE_ADMIN_TOKEN="$admin" BLOBGATE_SEAL_KEY=a-seal-key-16-chars-long ${GODEPOT_STAND_BLOBGATE_ENV:-})
+
+# launch_program starts the program of blobgate (not the image) and records its pid.
+launch_program() {
+  bin="${BLOBGATE_BIN:-$(command -v blobgate || true)}"
+  [ -x "$bin" ] || { echo "blobgate-stand: set BLOBGATE_IMAGE or BLOBGATE_BIN" >&2; exit 1; }
+  env "${env_for_blobgate[@]}" nohup "$bin" >>"$dir/blobgate.log" 2>&1 &
+  echo $! >"$dir/pid"
+}
 
 case "${1:-}" in
 start)
   "$0" stop >/dev/null 2>&1 || true
   mkdir -p "$dir/n1" "$dir/n2" "$dir/p1"
-  docker run -d --name godepot-rq -p "127.0.0.1:$rq:4001" "$rqlite" -fk -disco-mode= >/dev/null
-  docker run -d --name godepot-stand-rq -p "127.0.0.1:$bg_rq:4001" "$rqlite" -fk -disco-mode= >/dev/null
+  if [ "${GODEPOT_STAND_HOSTNET:-}" = 1 ]; then
+    # on the host network: no port forwarding between the program and rqlite (under many connections the forwarding was seen to reset some)
+    docker run -d --name godepot-rq --network host "$rqlite" -fk -disco-mode= -http-addr "127.0.0.1:$rq" -raft-addr "127.0.0.1:$((rq + 10))" >/dev/null
+    docker run -d --name godepot-stand-rq --network host "$rqlite" -fk -disco-mode= -http-addr "127.0.0.1:$bg_rq" -raft-addr "127.0.0.1:$((bg_rq + 10))" >/dev/null
+  else
+    docker run -d --name godepot-rq -p "127.0.0.1:$rq:4001" "$rqlite" -fk -disco-mode= >/dev/null
+    docker run -d --name godepot-stand-rq -p "127.0.0.1:$bg_rq:4001" "$rqlite" -fk -disco-mode= >/dev/null
+  fi
   wait_for "http://127.0.0.1:$rq/readyz"; wait_for "http://127.0.0.1:$bg_rq/readyz"
   if [ -n "${BLOBGATE_IMAGE:-}" ]; then
     nodes='":local:/data/n1"},{"remote":":local:/data/n2"'
     docker run -d --name godepot-stand-bg --network host --read-only --tmpfs /data:rw,mode=1777,size=2g \
       $(printf -- '-e %s ' "${env_for_blobgate[@]}") "$BLOBGATE_IMAGE" >/dev/null
   else
-    bin="${BLOBGATE_BIN:-$(command -v blobgate || true)}"
-    [ -x "$bin" ] || { echo "blobgate-stand: set BLOBGATE_IMAGE or BLOBGATE_BIN" >&2; exit 1; }
     nodes="\":local:$dir/n1\"},{\"remote\":\":local:$dir/n2\""
-    env "${env_for_blobgate[@]}" nohup "$bin" >"$dir/blobgate.log" 2>&1 &
-    echo $! >"$dir/pid"
+    # GODEPOT_STAND_NODES=1: one node, for the tests that write a lot
+    [ "${GODEPOT_STAND_NODES:-2}" = 1 ] && nodes="\":local:$dir/n1\""
+    launch_program
   fi
   wait_for "http://127.0.0.1:$port/readyz"
   curl -sf -X PUT "http://127.0.0.1:$port/v1/admin/stores/main" -H "Authorization: Bearer $admin" \
@@ -41,10 +55,17 @@ start)
     -d "{\"kind\":\"mirror\",\"nodes\":[{\"remote\":$plain}]}" >/dev/null
   echo "export GODEPOT_RQLITE_URL=http://127.0.0.1:$rq GODEPOT_BLOBGATE_URL=http://127.0.0.1:$port GODEPOT_BLOBGATE_TENANT=$tenant GODEPOT_BLOBGATE_SECRET=$secret GODEPOT_BLOBGATE_STORE=main"
   ;;
+kill-blobgate) # kill -9 of the program (the stand of the program, not the image), as a power cut would
+  kill -9 "$(cat "$dir/pid")"
+  ;;
+start-blobgate) # starts it again, on the same database and the same nodes
+  launch_program
+  wait_for "http://127.0.0.1:$port/readyz"
+  ;;
 stop)
   [ -f "$dir/pid" ] && kill "$(cat "$dir/pid")" 2>/dev/null || true
   docker rm -f godepot-rq godepot-stand-rq godepot-stand-bg >/dev/null 2>&1 || true
   rm -rf "$dir"
   ;;
-*) echo "usage: $0 start|stop" >&2; exit 2 ;;
+*) echo "usage: $0 start|stop|kill-blobgate|start-blobgate" >&2; exit 2 ;;
 esac

@@ -16,6 +16,10 @@ Statement coverage over `./cmd/godepot` and `./internal/...` with the stand: 87.
 
 The checks that CI will run, run by hand on 2026-11-17: `gofmt`, `go vet`, staticcheck v0.8.2 with all checks (no findings), gosec v2.29.0 (one finding, an intended read of the file a setting names, annotated), govulncheck v1.9.0 (no vulnerabilities), the build repeated twice for amd64 and for arm64 (the same bytes each time), the image built and run read-only with `--cap-drop ALL`.
 
+## Step 0, run 2026-11-17
+
+A 10 GiB object, 50 to 500 slow readers, 200 000 small objects and `kill -9` of blobgate at five points, against a real blobgate: [step0-probes.md](step0-probes.md). Findings: blobgate's memory is about 10 MiB for each slow download; deleting frees the disk one pass of blobgate later; everything survived the kills; the adapter now tries a call again on 502, 503, 504 and on connection failures.
+
 ## Not built
 
 - **Any format**, the proxy, groups, policies, accounts, tokens, the audit log, the settings file, the web pages: steps 3 to 12 of the plan.
@@ -26,5 +30,5 @@ The checks that CI will run, run by hand on 2026-11-17: `gofmt`, `go vet`, stati
 ## Not run
 
 - Anything on a second machine, on a cluster of rqlite, on a slow or failing node of blobgate, or with blobgate killed.
-- A 10 GiB object (2 GiB was run), many slow readers (plan T39), the ceiling of rqlite (plan T38).
+- The ceiling of rqlite (plan T38). A million small objects, a mirror of two nodes, nodes of other kinds: [step0-probes.md](step0-probes.md).
 - The race tests at the 10 000 rounds the plan asks for (3000 were run on 2026-11-16).

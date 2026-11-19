@@ -18,7 +18,7 @@ tools/test/blobgate-stand.sh stop
 
 `-p 1` is **required**: the packages share one database, and each test drops and makes the tables, so two packages at once break each other.
 
-Instead of an image the stand can use the program: `BLOBGATE_BIN=/path/to/blobgate`.
+Instead of an image the stand can use the program: `BLOBGATE_BIN=/path/to/blobgate`. Only then can the stand kill and start it again (`blobgate-stand.sh kill-blobgate`, `start-blobgate`), and the probes of step 0 (`go run ./tools/probe big|slow|many|kill`, [step0-probes.md](step0-probes.md)) need it.
 
 ## What the variables do
 
@@ -29,6 +29,10 @@ Instead of an image the stand can use the program: `BLOBGATE_BIN=/path/to/blobga
 | `GODEPOT_RACE_N` | Rounds of the race tests (default 150). |
 | `GODEPOT_BIG_MIB` | Runs `TestBigObject`: a stream of this many MiB through the layer. Skipped without it. |
 | `GODEPOT_STAND_DIR` | Where the stand keeps its directories (default `$TMPDIR/godepot-bg-stand`). |
+| `GODEPOT_STAND_NODES` | `1`: the store of the stand has one node, not two (for the probes that write a lot). |
+| `GODEPOT_STAND_BLOBGATE_ENV` | More settings for the program of blobgate, separated by spaces (`BLOBGATE_THREADS=64`). |
+| `GODEPOT_STAND_HOSTNET` | `1`: the two rqlites run on the host network. Through docker's port forwarding many connections were reset: [step0-probes.md](step0-probes.md). |
+| `GODEPOT_STAND_SCRIPT` | The path of the stand script, for `tools/probe kill` (default `tools/test/blobgate-stand.sh`). |
 
 ## What was run
 
