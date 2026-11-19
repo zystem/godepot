@@ -3,9 +3,13 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/zystem/godepot/internal/auth"
+	"github.com/zystem/godepot/internal/settings"
 )
 
 func read(t *testing.T, path string) string {
@@ -49,12 +53,12 @@ func TestEverySettingMetricAndCommandIsInTheDocs(t *testing.T) {
 			t.Errorf("metric %s is not in docs/metrics.md", m[1])
 		}
 	}
-	for _, m := range regexp.MustCompile(`(?m)^  ([a-z]+) {2,}`).FindAllStringSubmatch(usage, -1) {
+	for _, m := range regexp.MustCompile(`(?m)^  ([a-z-]+) {2,}`).FindAllStringSubmatch(usage, -1) {
 		if !strings.Contains(conf, "`godepot "+m[1]) {
 			t.Errorf("the command %s is not in docs/configuration.md", m[1])
 		}
 	}
-	for _, flag := range []string{"-fix"} {
+	for _, flag := range []string{"-fix", "-robot", "-admin", "-life", "-repositories", "-paths", "-actions", "-note"} {
 		if !strings.Contains(conf, flag) {
 			t.Errorf("the flag %s is not in docs/configuration.md", flag)
 		}
@@ -81,6 +85,56 @@ func TestTheBlobLayerPageNamesWhatItReturns(t *testing.T) {
 	for _, w := range []string{"ErrExpired", "ErrDigest", "ErrNotFound", "ErrNotLinked", "blob_not_live", "upload_gone"} {
 		if !strings.Contains(page, w) {
 			t.Errorf("%s is not in docs/blob-layer.md", w)
+		}
+	}
+}
+
+// Every word of the settings file has its line in docs/settings-file.md (the words are read from the structures the file is read into).
+func TestEveryWordOfTheSettingsFileIsInItsPage(t *testing.T) {
+	page := read(t, "../../docs/settings-file.md")
+	var walk func(reflect.Type)
+	walk = func(ty reflect.Type) {
+		for i := 0; i < ty.NumField(); i++ {
+			f := ty.Field(i)
+			if f.Anonymous {
+				walk(f.Type)
+				continue
+			}
+			word, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if word != "" && !strings.Contains(page, "`"+word+"`") {
+				t.Errorf("the word %q of the settings file is not in docs/settings-file.md", word)
+			}
+			if f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Struct {
+				walk(f.Type.Elem())
+			}
+		}
+	}
+	walk(reflect.TypeOf(settings.Settings{}))
+	_ = auth.Read
+}
+
+// Every call of the API, every header of the format raw and every action is in its page.
+func TestTheAPIAndTheFormatAreInTheirPages(t *testing.T) {
+	access, rawPage := read(t, "../../docs/api.md"), read(t, "../../docs/raw.md")
+	api := read(t, "../../internal/server/api.go")
+	for _, m := range regexp.MustCompile(`parts\[0\] == "([a-z]+)"`).FindAllStringSubmatch(api, -1) {
+		if !regexp.MustCompile("/api/v1/" + m[1] + `\b`).MatchString(access) {
+			t.Errorf("the call /api/v1/%s is not in docs/api.md", m[1])
+		}
+	}
+	for _, h := range []string{"X-Checksum-Sha256", "X-Godepot-Property-", "Content-Type", "If-None-Match", "Range"} {
+		if !strings.Contains(rawPage, h) {
+			t.Errorf("the header %s is not in docs/raw.md", h)
+		}
+	}
+	for _, a := range []string{auth.Read, auth.Write, auth.Delete, auth.Promote, auth.Admin} {
+		if !strings.Contains(read(t, "../../docs/settings-file.md"), "`"+a+"`") {
+			t.Errorf("the action %s is not in docs/settings-file.md", a)
+		}
+	}
+	for _, code := range []string{"200", "201", "204", "304", "400", "401", "403", "404", "409", "413", "416", "503"} {
+		if !strings.Contains(rawPage+access, "`"+code+"`") {
+			t.Errorf("the status %s is not in docs/raw.md or docs/api.md", code)
 		}
 	}
 }

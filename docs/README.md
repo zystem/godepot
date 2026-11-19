@@ -6,6 +6,10 @@ Every page is of one kind (Diátaxis). The README at the root is the way in.
 |---|---|---|
 | [../README.md](../README.md) | tutorial | the try-it, with the output of every command |
 | [configuration.md](configuration.md) | reference | every environment variable, command and exit code, with default and whether a restart is needed |
+| [settings-file.md](settings-file.md) | reference | every word of the settings file: repositories, grants, patterns |
+| [raw.md](raw.md) | reference | every request of the format `raw`, with its answers |
+| [api.md](api.md) | reference | every call of the API, how a client sends a token, the fields of the audit log |
+| [access.md](access.md) | explanation | accounts, tokens and the audit log: how a request is checked, and why |
 | [metrics.md](metrics.md) | reference | every metric |
 | [testing.md](testing.md) | how-to | run the tests, with a real rqlite and a real blobgate; what was run |
 | [blob-layer.md](blob-layer.md) | explanation | what happens to bytes, and what a crash leaves |
