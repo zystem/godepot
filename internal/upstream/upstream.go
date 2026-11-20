@@ -301,6 +301,32 @@ func Missing(status int) bool {
 // their status (200, 206, 304, 404, 401 or 403 for one name, and other 4xx; see Missing); an error, a 429 or a 5xx is a *FailError (and starts the pause), a pause that is on is a *PausedError, and
 // credentials that are refused for every name are ErrCredentials (and start the pause). The caller closes the body.
 func (c *Client) Do(ctx context.Context, method, path string, header http.Header) (*http.Response, error) {
+	return c.doTarget(ctx, method, c.base.String()+path, header)
+}
+
+// DoURL asks for an address that the upstream named itself (a file that an index says is on another host). The host must be the upstream's own or one of file_hosts; credentials are sent only to the
+// upstream's own host (P8), and the address is checked as every other (P9). The rest is as Do.
+func (c *Client) DoURL(ctx context.Context, method, target string, header http.Header) (*http.Response, error) {
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return nil, fmt.Errorf("the upstream named an address that is not taken: %q", target)
+	}
+	if !strings.EqualFold(u.Host, c.base.Host) && !c.fileHost(u.Hostname()) {
+		return nil, fmt.Errorf("the upstream named a file on the host %q, which is not the upstream's and not in file_hosts", u.Hostname())
+	}
+	return c.doTarget(ctx, method, target, header)
+}
+
+func (c *Client) fileHost(host string) bool {
+	for _, h := range c.cfg.FileHosts {
+		if strings.EqualFold(h, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) doTarget(ctx context.Context, method, target string, header http.Header) (*http.Response, error) {
 	if p, err := c.Paused(ctx); err != nil {
 		return nil, err
 	} else if p != nil {
@@ -327,7 +353,7 @@ func (c *Client) Do(ctx context.Context, method, path string, header http.Header
 			return nil, ctx.Err()
 		}
 	}
-	resp, err := c.once(ctx, method, c.base.String()+path, header, "")
+	resp, err := c.once(ctx, method, target, header, "")
 	challenged := false
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		scope, ok, cerr := c.challenge(ctx, resp)
@@ -343,7 +369,7 @@ func (c *Client) Do(ctx context.Context, method, path string, header http.Header
 		if ok {
 			challenged = true
 			resp.Body.Close()
-			resp, err = c.once(ctx, method, c.base.String()+path, header, scope)
+			resp, err = c.once(ctx, method, target, header, scope)
 		}
 	}
 	if err != nil {
@@ -422,7 +448,10 @@ func (c *Client) once(ctx context.Context, method, target string, header http.He
 		req.Header[k] = v
 	}
 	req.Header.Set("User-Agent", "godepot")
+	own := strings.EqualFold(req.URL.Host, c.base.Host)
 	switch {
+	case !own:
+		// A host that the upstream's index named: no credentials, ever (P8).
 	case scope != "":
 		c.mu.Lock()
 		t := c.toks[scope]

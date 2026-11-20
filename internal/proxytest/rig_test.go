@@ -25,6 +25,7 @@ import (
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/oci"
+	"github.com/zystem/godepot/internal/pypi"
 	"github.com/zystem/godepot/internal/raw"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
@@ -112,9 +113,10 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 	r.pool = &upstream.Pool{DB: db, Now: now, M: &upstream.Metrics{Requests: r.reqs, Errors: r.errs, Stale: r.stale, Changed: r.changed}}
 	rawFormat := &raw.Raw{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate}
 	s := &server.Server{Auth: as, Audit: al, Formats: map[string]format.Format{
-		"raw": rawFormat,
-		"go":  gomod.New(rawFormat),
-		"oci": &oci.OCI{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate, MaxManifest: 1 << 20},
+		"raw":  rawFormat,
+		"go":   gomod.New(rawFormat),
+		"pypi": pypi.New(rawFormat),
+		"oci":  &oci.OCI{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate, MaxManifest: 1 << 20},
 	}}
 	s.Settings.Store(set)
 	r.ts = httptest.NewServer(s)

@@ -101,3 +101,27 @@ func (e *ReadErr) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// BlobReaderAt reads a blob of the blob layer at any place, as an io.ReaderAt: what a zip needs to be read where it is kept, without a copy on a disk.
+type BlobReaderAt struct {
+	Ctx    context.Context
+	L      *blob.Layer
+	Digest string
+}
+
+// ReadAt reads len(p) bytes at off.
+func (b BlobReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	rc, _, err := b.L.Open(b.Ctx, b.Digest, off, off+int64(len(p))-1)
+	if err != nil {
+		return 0, err
+	}
+	defer rc.Close()
+	n, err := io.ReadFull(rc, p)
+	if err == io.ErrUnexpectedEOF {
+		return n, io.EOF
+	}
+	return n, err
+}

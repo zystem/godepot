@@ -18,7 +18,7 @@ import (
 )
 
 // Formats that exist. A format is added here when its door is built.
-var formats = map[string]bool{"raw": true, "oci": true, "go": true}
+var formats = map[string]bool{"raw": true, "oci": true, "go": true, "pypi": true}
 
 // Repo is one repository.
 type Repo struct {
@@ -79,6 +79,8 @@ type Upstream struct {
 	// TokenHosts are the hosts, besides the upstream's own, that may be sent the credentials when the upstream answers 401 and names them as its token service (Docker Hub: "auth.docker.io"). Default
 	// none: the token service is asked with no credentials, and credentials are never sent to another host (P8).
 	TokenHosts []string `json:"token_hosts,omitempty"`
+	// FileHosts are the hosts, besides the upstream's own, that an index of the upstream may name for its files (PyPI: files.pythonhosted.org). Default none. They are never sent credentials.
+	FileHosts []string `json:"file_hosts,omitempty"`
 	// AllowPrivate lets godepot fetch from loopback, private and link-local addresses (P9). Default false: such an address is refused after the name is resolved.
 	AllowPrivate bool `json:"allow_private,omitempty"`
 	// MaxPerSecond limits the requests to the upstream (0: no limit). MaxConcurrent limits those at once (default 16).
@@ -217,7 +219,7 @@ func (s *Settings) Check() error {
 		}
 		seen[r.Name] = true
 		if !formats[r.Format] {
-			add("%s: the format %q is not known (known: raw, oci, go)", who, r.Format)
+			add("%s: the format %q is not known (known: raw, oci, go, pypi)", who, r.Format)
 		}
 		switch r.Kind {
 		case "hosted":
@@ -247,8 +249,8 @@ func (s *Settings) Check() error {
 			}
 		} else if len(r.ImmutableTags) > 0 {
 			add("%s: immutable_tags is for the format oci", who)
-		} else if r.Format == "go" && len(r.OverwritePaths) > 0 {
-			add("%s: overwrite_paths is for the format raw; a version of a Go module is never overwritten", who)
+		} else if (r.Format == "go" || r.Format == "pypi") && len(r.OverwritePaths) > 0 {
+			add("%s: overwrite_paths is for the format raw; a published file of this format is never overwritten", who)
 		}
 		if r.QuotaBytes < 0 || r.QuotaComponents < 0 {
 			add("%s: a quota is negative", who)
@@ -301,9 +303,9 @@ func (s *Settings) checkProxy(who string, r *Repo, add func(string, ...any)) {
 	if (u.Username != "" || u.TokenEnv != "") && u.PasswordEnv == "" && u.TokenEnv == "" {
 		add("%s: upstream.username needs password_env", who)
 	}
-	for _, h := range u.TokenHosts {
+	for _, h := range append(append([]string{}, u.TokenHosts...), u.FileHosts...) {
 		if h == "" || strings.ContainsAny(h, "/: ") {
-			add("%s: upstream.token_hosts has %q: a host name with no port or path", who, h)
+			add("%s: upstream.token_hosts and file_hosts have %q: a host name with no port or path", who, h)
 		}
 	}
 	if u.MaxPerSecond < 0 || u.MaxConcurrent < 0 {

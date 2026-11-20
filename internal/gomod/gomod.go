@@ -182,33 +182,10 @@ func (g *Go) latest(w http.ResponseWriter, r *http.Request, q format.Request, t 
 	g.Raw.Serve(w, r, q)
 }
 
-// zipAt reads a zip that is a blob.
-type zipAt struct {
-	ctx    context.Context
-	l      *blob.Layer
-	digest string
-}
-
-func (z zipAt) ReadAt(p []byte, off int64) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	rc, _, err := z.l.Open(z.ctx, z.digest, off, off+int64(len(p))-1)
-	if err != nil {
-		return 0, err
-	}
-	defer rc.Close()
-	n, err := io.ReadFull(rc, p)
-	if err == io.ErrUnexpectedEOF {
-		return n, io.EOF
-	}
-	return n, err
-}
-
 // checkZip reads a module zip without unpacking it anywhere: every name must be under "<module>@<version>/", no name may climb out or repeat, the files may add up to no more than the go command takes,
 // and the go.mod in it must name the module. It returns the go.mod.
 func checkZip(ctx context.Context, l *blob.Layer, digest string, size int64, module, version string) ([]byte, error) {
-	zr, err := zip.NewReader(zipAt{ctx, l, digest}, size)
+	zr, err := zip.NewReader(format.BlobReaderAt{Ctx: ctx, L: l, Digest: digest}, size)
 	if err != nil {
 		return nil, errors.New("the body is not a zip")
 	}
