@@ -20,6 +20,28 @@ tools/test/blobgate-stand.sh stop
 
 Instead of an image the stand can use the program: `BLOBGATE_BIN=/path/to/blobgate`. Only then can the stand kill and start it again (`blobgate-stand.sh kill-blobgate`, `start-blobgate`), and the probes of step 0 (`go run ./tools/probe big|slow|many|kill`, [step0-probes.md](step0-probes.md)) need it.
 
+## The OCI door: the conformance suite and the clients
+
+With the stand running and its variables set, `tools/test/oci-run.sh` builds the program, starts it on port 18190 with a repository of the format `oci`, makes an admin account and a token of its own, and runs the **conformance suite** of the OCI distribution specification (fetched and built once into `GODEPOT_OCI_CACHE`, default `$TMPDIR/godepot-oci-cache`, at the commit written in the script), then every client it finds (`crane`, `skopeo`, `helm`, `oras`, `cosign`, `docker`, `podman`). It prints one line for each: `ok`, `skipped` with the reason, or `FAILED`; the exit code is 1 when one that ran failed.
+
+```bash
+eval "$(tools/test/blobgate-stand.sh start)"
+tools/test/oci-run.sh
+```
+
+```
+conformance  ok       SUCCESS! -- 73 Passed | 0 Failed | 0 Pending | 6 Skipped
+crane        ok       copy of alpine:3.20 in, the digest of the tag is the same as at the source
+skopeo       ok       copy of alpine:3.19 in and out
+helm         ok       a chart pushed and pulled, the file is the same
+oras         ok       an artifact pushed, a note attached (found by the referrers API), pulled
+cosign       ok       an image signed with a key and verified
+docker       skipped  the daemon does not take 127.0.0.1:18190 on plain HTTP (add it to insecure-registries): Error response from daemon: ...
+podman       skipped  not installed
+```
+
+(That is the output of 2026-11-20; the `docker` line is cut. The clients need the network: they copy `alpine` from a public registry.) `tools/ocibig` pushes and pulls a big layer through a running program and reads its memory ([oci.md](oci.md) has the figures): `go run ./tools/ocibig -url http://127.0.0.1:18100 -token $T -name reg/big -pid $(pgrep -f 'godepot serve') -mib 10240`.
+
 ## What the variables do
 
 | Variable | Meaning |
@@ -28,6 +50,7 @@ Instead of an image the stand can use the program: `BLOBGATE_BIN=/path/to/blobga
 | `GODEPOT_BLOBGATE_URL`, `GODEPOT_BLOBGATE_TENANT`, `GODEPOT_BLOBGATE_SECRET`, `GODEPOT_BLOBGATE_STORE` | A real blobgate for the tests of the blob layer. Without them the layer is tested over a store in memory that links as blobgate does. With them the whole suite runs over blobgate, and each test first removes every key of the tenant. |
 | `GODEPOT_RACE_N` | Rounds of the race tests (default 150). |
 | `GODEPOT_BIG_MIB` | Runs `TestBigObject`: a stream of this many MiB through the layer. Skipped without it. |
+| `GODEPOT_OCI_CACHE` | Where `tools/test/oci-run.sh` keeps the conformance suite it fetched and built (default `$TMPDIR/godepot-oci-cache`). |
 | `GODEPOT_STAND_DIR` | Where the stand keeps its directories (default `$TMPDIR/godepot-bg-stand`). |
 | `GODEPOT_STAND_NODES` | `1`: the store of the stand has one node, not two (for the probes that write a lot). |
 | `GODEPOT_STAND_BLOBGATE_ENV` | More settings for the program of blobgate, separated by spaces (`BLOBGATE_THREADS=64`). |

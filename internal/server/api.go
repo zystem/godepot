@@ -21,13 +21,13 @@ import (
 //
 // A token never has more than its account has (the account's grants and the token's scope must both allow), so making a token with a wide scope gives nothing that the account lacks.
 func (s *Server) api(w http.ResponseWriter, r *http.Request) {
-	p := s.principal(w, r)
+	p := s.principal(w, r, fail)
 	if p == nil {
 		return
 	}
 	if p.Anonymous() {
 		s.count("unauthenticated")
-		unauthorized(w)
+		unauthorized(w, fail)
 		return
 	}
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, apiPrefix), "/"), "/")

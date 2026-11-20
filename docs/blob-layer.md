@@ -111,7 +111,7 @@ Not run, not built:
 - **Many slow readers of ranges against blobgate** (plan T39), and a million small objects in a listing.
 - **blobgate killed (`kill -9`) between an upload and its link.** The crash tests stop godepot at each step, not blobgate.
 - **A change of leader of rqlite**, more than one node of it, or a second replica of godepot as a separate process (the races are goroutines of one process).
-- **An upload in several requests** (an OCI upload in chunks, resumed). `Ingest` reads one stream; the store interface has no parts yet.
+- **An upload in several requests** (an OCI upload in chunks). `Ingest` reads one stream and the store interface has no parts, so the format `oci` takes each chunk in as a blob held by the upload (`ociupload:<id>`) and, at the end, reads them in order into one `Ingest` that checks the digest of the whole ([oci.md](oci.md)). It costs one more read and write of the layer; a client that sends the layer in one `PATCH` does not pay it. Streaming parts to blobgate's multipart upload would avoid it, but an object made by a multipart upload has no digest that `?link` can find (blobgate's deduplication page), so the layer would have to be sent again anyway.
 - **A sign of life of a long upload.** An upload slower than `UploadTTL` is swept.
 - **The ceiling of rqlite** (plan, T38): nothing was measured. A pass of `Collect` makes three calls per blob.
 - The plan asks for 10 000 rounds of the race; 3000 were run.

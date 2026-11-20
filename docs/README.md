@@ -10,6 +10,8 @@ Every page is of one kind (Diátaxis). The README at the root is the way in.
 | [raw.md](raw.md) | reference | every request of the format `raw`, with its answers |
 | [api.md](api.md) | reference | every call of the API, how a client sends a token, the fields of the audit log |
 | [access.md](access.md) | explanation | accounts, tokens and the audit log: how a request is checked, and why |
+| [oci.md](oci.md) | reference | every request of the format `oci` (the OCI distribution API), its answers and error codes, what is not done, what was run |
+| [oci-clients.md](oci-clients.md) | how-to | connect `helm`, `oras`, `crane`, `skopeo`, `cosign`, `docker`, `podman`, with the output of each command |
 | [metrics.md](metrics.md) | reference | every metric |
 | [testing.md](testing.md) | how-to | run the tests, with a real rqlite and a real blobgate; what was run |
 | [blob-layer.md](blob-layer.md) | explanation | what happens to bytes, and what a crash leaves |

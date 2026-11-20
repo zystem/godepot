@@ -4,13 +4,9 @@ package raw
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	mrand "math/rand/v2"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -33,6 +29,10 @@ type Raw struct {
 	Audit *audit.Log
 	// Reads, Writes and Deletes count the requests per repository; Refused counts by reason. nil: not counted.
 	Reads, Writes, Deletes, Refused *metrics.Counter
+	// Downloads limits the files being sent at once (nil: no limit); Rate is the least speed of a client in bytes a second (0: none); Active shows how many are going on (docs/spec.md, P11).
+	Downloads *format.Gate
+	Rate      int64
+	Active    *metrics.Gauge
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 }
@@ -227,7 +227,7 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 			h.conflict(w, q, path, old.digest)
 			return
 		}
-		id := blobToken()
+		id := format.Token()
 		owner := "asset:" + id
 		stmts := h.Blobs.Hold(owner, up.Digest)
 		if q.Repo.QuotaBytes > 0 {
@@ -247,7 +247,7 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 				meta.S(`DELETE FROM assets WHERE id = ?`, old.id),
 				meta.S(`UPDATE components SET props = ?, created_by = ?, created_at = ? WHERE id = ?`, string(pj), q.Actor(), h.nowUnix(), component))
 		} else {
-			component = blobToken()
+			component = format.Token()
 			if q.Repo.QuotaComponents > 0 {
 				stmts = append(stmts, meta.Unless("quota_components", `SELECT 1 WHERE (SELECT COUNT(*) FROM components WHERE repo = ?) >= ?`, q.Repo.Name, q.Repo.QuotaComponents))
 			}
@@ -264,7 +264,7 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 			if why, refused := meta.RefusedBy(err); refused {
 				switch why {
 				case "changed":
-					pause(ctx, try) // another request changed the path between the look and the commit: look again
+					format.Pause(ctx, try) // another request changed the path between the look and the commit: look again
 					continue
 				case "quota_bytes", "quota_components":
 					_ = h.Blobs.Abandon(ctx, up)
@@ -295,25 +295,10 @@ func (h *Raw) nowUnix() int64 {
 	return time.Now().Unix()
 }
 
-// pause waits a little, longer after each try and never the same for two writers, so that writers of one path do not keep colliding.
-func pause(ctx context.Context, try int) {
-	n := 2 + try
-	if n > 20 {
-		n = 20
+func (h *Raw) setActive() {
+	if h.Active != nil {
+		h.Active.Set(int64(h.Downloads.InUse()))
 	}
-	d := time.Duration(mrand.IntN(n)+1) * time.Millisecond // #nosec G404 -- a back-off, not a secret
-	select {
-	case <-ctx.Done():
-	case <-time.After(d):
-	}
-}
-
-func blobToken() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(err) // no randomness: nothing safe can be done
-	}
-	return hex.EncodeToString(b)
 }
 
 func (h *Raw) done(w http.ResponseWriter, code int, path string, up *blob.Upload) {
@@ -381,7 +366,7 @@ func (h *Raw) get(w http.ResponseWriter, r *http.Request, q format.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	from, to, partial, ok := parseRange(r.Header.Get("Range"), a.size)
+	from, to, partial, ok := format.ParseRange(r.Header.Get("Range"), a.size)
 	if !ok {
 		hd.Set("Content-Range", fmt.Sprintf("bytes */%d", a.size))
 		fail(w, http.StatusRequestedRangeNotSatisfiable, "the range cannot be satisfied", nil)
@@ -406,8 +391,19 @@ func (h *Raw) get(w http.ResponseWriter, r *http.Request, q format.Request) {
 		w.WriteHeader(code)
 		return
 	}
+	release, ok := h.Downloads.Acquire(r.Context())
+	if !ok {
+		h.count(h.Refused, "busy")
+		hd.Del("Content-Length")
+		hd.Set("Retry-After", "5")
+		fail(w, http.StatusServiceUnavailable, "too many downloads are going on: try again", nil)
+		return
+	}
+	h.setActive()
+	defer func() { release(); h.setActive() }()
 	rc, _, err := h.Blobs.Open(r.Context(), a.digest, from, to)
 	if err != nil {
+		hd.Del("Content-Length")
 		if errors.Is(err, blob.ErrNotFound) {
 			fail(w, http.StatusInternalServerError, "the bytes of this file are missing: run `godepot reconcile`", nil)
 			return
@@ -417,51 +413,7 @@ func (h *Raw) get(w http.ResponseWriter, r *http.Request, q format.Request) {
 	}
 	defer rc.Close()
 	w.WriteHeader(code)
-	_, _ = io.Copy(w, rc) // a client that goes away ends the copy; the status has been sent
-}
-
-// parseRange reads one range of a Range header ("bytes=a-b", "bytes=a-", "bytes=-n") over a body of size bytes. Several ranges, or a header that is not bytes, are answered with the whole body.
-// ok is false for a range that lies outside the body.
-func parseRange(h string, size int64) (from, to int64, partial, ok bool) {
-	if size == 0 {
-		return 0, -1, false, h == "" || !strings.HasPrefix(h, "bytes=")
-	}
-	whole := func() (int64, int64, bool, bool) { return 0, size - 1, false, true }
-	spec, found := strings.CutPrefix(h, "bytes=")
-	if !found || strings.Contains(spec, ",") {
-		return whole()
-	}
-	a, b, found := strings.Cut(spec, "-")
-	if !found {
-		return whole()
-	}
-	switch {
-	case a == "":
-		n, err := strconv.ParseInt(b, 10, 64)
-		if err != nil || n <= 0 {
-			return 0, 0, false, false
-		}
-		if n > size {
-			n = size
-		}
-		return size - n, size - 1, true, true
-	default:
-		f, err := strconv.ParseInt(a, 10, 64)
-		if err != nil || f < 0 || f >= size {
-			return 0, 0, false, false
-		}
-		t := size - 1
-		if b != "" {
-			t, err = strconv.ParseInt(b, 10, 64)
-			if err != nil || t < f {
-				return 0, 0, false, false
-			}
-			if t > size-1 {
-				t = size - 1
-			}
-		}
-		return f, t, true, true
-	}
+	_, _ = format.CopyPaced(w, rc, h.Rate) // a client that goes away, or is too slow, ends the copy; the status has been sent
 }
 
 func (h *Raw) delete(w http.ResponseWriter, r *http.Request, q format.Request) {
@@ -493,7 +445,7 @@ func (h *Raw) delete(w http.ResponseWriter, r *http.Request, q format.Request) {
 			h.Audit.Stmt(ev))
 		if _, err := h.DB.Exec(ctx, stmts...); err != nil {
 			if why, refused := meta.RefusedBy(err); refused && why == "changed" {
-				pause(ctx, try)
+				format.Pause(ctx, try)
 				continue
 			}
 			h.unavailable(w, err)

@@ -93,3 +93,26 @@ func TestAllows(t *testing.T) {
 		}
 	}
 }
+
+// The format oci has immutable tags, and none of the settings that only a file path has; the other formats have no immutable tags.
+func TestOCISettings(t *testing.T) {
+	ok := `{"repositories": [{"name": "reg", "format": "oci", "kind": "hosted", "immutable_tags": ["v*", "release-*"]}]}`
+	s, err := settings.Parse(strings.NewReader(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := s.Repo("reg")
+	if !r.ImmutableTag("v1") || !r.ImmutableTag("release-2") || r.ImmutableTag("latest") || r.ImmutableTag("dev/v1") {
+		t.Fatal("ImmutableTag does not follow the patterns")
+	}
+	for text, word := range map[string]string{
+		`{"repositories": [{"name": "reg", "format": "oci", "kind": "hosted", "overwrite_paths": ["a"]}]}`:         "overwrite_paths is for the format raw",
+		`{"repositories": [{"name": "reg", "format": "oci", "kind": "hosted", "quota_bytes": 5}]}`:                 "quota is not built for the format oci",
+		`{"repositories": [{"name": "reg", "format": "oci", "kind": "hosted", "immutable_tags": ["*a*a*a*a*a"]}]}`: "immutable_tags",
+		`{"repositories": [{"name": "f", "format": "raw", "kind": "hosted", "immutable_tags": ["v*"]}]}`:           "immutable_tags is for the format oci",
+	} {
+		if _, err := settings.Parse(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), word) {
+			t.Errorf("%s: %v, want a problem with %q", text, err, word)
+		}
+	}
+}
