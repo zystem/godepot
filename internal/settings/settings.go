@@ -18,7 +18,7 @@ import (
 )
 
 // Formats that exist. A format is added here when its door is built.
-var formats = map[string]bool{"raw": true, "oci": true}
+var formats = map[string]bool{"raw": true, "oci": true, "go": true}
 
 // Repo is one repository.
 type Repo struct {
@@ -217,7 +217,7 @@ func (s *Settings) Check() error {
 		}
 		seen[r.Name] = true
 		if !formats[r.Format] {
-			add("%s: the format %q is not known (known: raw, oci)", who, r.Format)
+			add("%s: the format %q is not known (known: raw, oci, go)", who, r.Format)
 		}
 		switch r.Kind {
 		case "hosted":
@@ -247,6 +247,8 @@ func (s *Settings) Check() error {
 			}
 		} else if len(r.ImmutableTags) > 0 {
 			add("%s: immutable_tags is for the format oci", who)
+		} else if r.Format == "go" && len(r.OverwritePaths) > 0 {
+			add("%s: overwrite_paths is for the format raw; a version of a Go module is never overwritten", who)
 		}
 		if r.QuotaBytes < 0 || r.QuotaComponents < 0 {
 			add("%s: a quota is negative", who)

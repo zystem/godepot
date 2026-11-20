@@ -33,7 +33,7 @@ func (h *Raw) group(w http.ResponseWriter, r *http.Request, q format.Request) {
 			return
 		}
 		q.Repo = m
-		h.Serve(w, r, q)
+		h.self().Serve(w, r, q)
 	case http.MethodGet, http.MethodHead:
 		if q.Path == "" || strings.HasSuffix(q.Path, "/") {
 			h.groupList(w, r, q)
@@ -46,7 +46,7 @@ func (h *Raw) group(w http.ResponseWriter, r *http.Request, q format.Request) {
 		if !q.Authorize(w, auth.Read, q.Path) {
 			return
 		}
-		m, err := format.Resolve(r.Context(), h.DB, q.Set, q.Repo, q.Path, func(l *settings.Repo) (bool, error) { return h.has(r.Context(), l, q.Path) })
+		m, err := format.Resolve(r.Context(), h.DB, q.Set, q.Repo, h.name(q.Path), func(l *settings.Repo) (bool, error) { return h.has(r.Context(), l, q.Path) })
 		if err != nil {
 			h.upstreamError(w, r, q, nil, err)
 			return
@@ -56,7 +56,7 @@ func (h *Raw) group(w http.ResponseWriter, r *http.Request, q format.Request) {
 			return
 		}
 		q.Repo = m
-		h.Serve(w, r, q)
+		h.self().Serve(w, r, q)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, PUT, DELETE")
 		fail(w, http.StatusMethodNotAllowed, "method not allowed", nil)
@@ -65,7 +65,19 @@ func (h *Raw) group(w http.ResponseWriter, r *http.Request, q format.Request) {
 
 // has says whether a member has the file: a hosted repository by its records, a proxy by its cache or, when the cache lacks it, by asking the upstream.
 func (h *Raw) has(ctx context.Context, l *settings.Repo, path string) (bool, error) {
-	a, err := h.find(ctx, l.Name, path)
+	name := h.name(path)
+	var a *asset
+	var err error
+	if name == path {
+		a, err = h.find(ctx, l.Name, path)
+	} else {
+		// A name that is more than one file (a module, an artifact): the repository has it when it holds a file below it.
+		var rows meta.Rows
+		rows, err = h.DB.Query(ctx, meta.S(`SELECT 1 FROM assets WHERE repo = ? AND substr(path, 1, ?) = ? LIMIT 1`, l.Name, len(name)+1, name+"/"))
+		if len(rows) > 0 {
+			a = &asset{}
+		}
+	}
 	if err != nil || a != nil || l.Kind != "proxy" {
 		return a != nil, err
 	}
@@ -73,10 +85,18 @@ func (h *Raw) has(ctx context.Context, l *settings.Repo, path string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if m, err := cl.Missed(ctx, "raw:"+path); err != nil || m {
+	if m, err := cl.Missed(ctx, "raw:"+name); err != nil || m {
 		return false, err
 	}
-	resp, err := cl.Do(ctx, http.MethodHead, "/"+escape(path), nil)
+	probe := path
+	if h.Layout != nil && h.Layout.Probe != nil {
+		probe = h.Layout.Probe(path)
+	}
+	method := http.MethodHead // for a file; a name that is more than a file is probed with a GET of a small page (a list of versions)
+	if probe != path || name != path {
+		method = http.MethodGet
+	}
+	resp, err := cl.Do(ctx, method, "/"+escape(probe), nil)
 	if err != nil {
 		return false, err
 	}
@@ -85,7 +105,7 @@ func (h *Raw) has(ctx context.Context, l *settings.Repo, path string) (bool, err
 		return true, nil
 	}
 	if upstream.Missing(resp.StatusCode) {
-		cl.Miss(ctx, "raw:"+path)
+		cl.Miss(ctx, "raw:"+name)
 	}
 	return false, nil
 }
@@ -133,7 +153,7 @@ func (h *Raw) client(l *settings.Repo) (*upstream.Client, error) {
 func escape(path string) string {
 	parts := strings.Split(path, "/")
 	for i, p := range parts {
-		parts[i] = url.PathEscape(p)
+		parts[i] = strings.ReplaceAll(url.PathEscape(p), "%21", "!") // "!" is how a Go module path escapes a capital: an upstream may not decode it
 	}
 	return strings.Join(parts, "/")
 }
@@ -172,7 +192,7 @@ func (h *Raw) proxyGet(w http.ResponseWriter, r *http.Request, q format.Request)
 		h.unavailable(w, err)
 		return
 	}
-	ttl := q.Repo.Upstream.FileTTL()
+	ttl := h.ttl(q.Repo.Upstream, path)
 	if old != nil && (ttl == 0 || h.nowUnix()-old.checked < int64(ttl/time.Second)) {
 		h.get(w, r, q) // what is in the cache and is still trusted: no word with the upstream (P3)
 		return
@@ -299,7 +319,7 @@ func (h *Raw) fetch(w http.ResponseWriter, r *http.Request, q format.Request, cl
 		h.touch(ctx, old)
 		h.get(w, r, q)
 		return nil, false
-	case http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusNotFound, http.StatusGone, http.StatusUnauthorized, http.StatusForbidden:
 		if old != nil { // the upstream dropped what we have: what we have is kept
 			h.touch(ctx, old)
 			h.get(w, r, q)
