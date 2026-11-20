@@ -24,6 +24,7 @@ import (
 	"github.com/zystem/godepot/internal/gomod"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/npm"
 	"github.com/zystem/godepot/internal/oci"
 	"github.com/zystem/godepot/internal/pypi"
 	"github.com/zystem/godepot/internal/raw"
@@ -116,6 +117,7 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 		"raw":  rawFormat,
 		"go":   gomod.New(rawFormat),
 		"pypi": pypi.New(rawFormat),
+		"npm":  npm.New(rawFormat),
 		"oci":  &oci.OCI{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate, MaxManifest: 1 << 20},
 	}}
 	s.Settings.Store(set)

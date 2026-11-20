@@ -27,6 +27,7 @@ import (
 	"github.com/zystem/godepot/internal/lease"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/npm"
 	"github.com/zystem/godepot/internal/oci"
 	"github.com/zystem/godepot/internal/pypi"
 	"github.com/zystem/godepot/internal/raw"
@@ -232,6 +233,7 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		"raw":  rawFormat,
 		"go":   gomod.New(rawFormat),
 		"pypi": pypi.New(rawFormat),
+		"npm":  npm.New(rawFormat),
 		"oci":  a.oci,
 	}}
 	a.srv.Settings.Store(&settings.Settings{})

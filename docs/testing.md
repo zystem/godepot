@@ -87,6 +87,19 @@ group    ok       corp-internal is not found, and pypi.org was not asked (claime
 
 (The output of 2026-11-20, pip 24.0, Python 3.12.3.)
 
+## The format npm: npm itself
+
+`tools/test/npm-run.sh` starts the program with a hosted, a proxy (of registry.npmjs.org) and a group repository of the format `npm`, and runs the real `npm` against the group: it publishes a scoped package (and a second version with a tag), installs it, moves a tag, deprecates a version, tries to publish a version again with other bytes, unpublishes a version and then the package; it installs two public packages through the proxy twice (the second time with an empty npm cache) and asks for a claimed name and a claimed scope. It needs the stand, `npm` and `node`, and the network.
+
+```
+hosted    ok       npm publish sent @corp/demo 1.0.0 and 1.1.0 (tag next) to the group; npm install took latest (1.0.0) from it: "hello from godepot"
+lifecycle ok       dist-tag ls/add, deprecate, a second publish of 1.0.0 with other bytes refused, unpublish of a version and of the package
+proxy     ok       left-pad and a scoped package installed through the proxy of registry.npmjs.org, the hashes checked; again with an empty npm cache: no request upstream (6 in all)
+group     ok       corp-internal and @corp/ui are not found, and registry.npmjs.org was not asked (claimed)
+```
+
+(The output of 2026-11-20, npm 9.2.0, node v18.19.1.)
+
 ## What the variables do
 
 | Variable | Meaning |

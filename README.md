@@ -173,7 +173,7 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 | know what it will be | [docs/spec.md](docs/spec.md), [docs/plan.md](docs/plan.md) (with the traps of other products, and the way round each) |
 | know how bytes are kept, and what a crash leaves | [docs/blob-layer.md](docs/blob-layer.md) |
 | set it up | [docs/configuration.md](docs/configuration.md) (every setting, command and exit code), [docs/settings-file.md](docs/settings-file.md) (repositories and grants) |
-| connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/access.md](docs/access.md) (how it works and why) |
+| connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/gomod.md](docs/gomod.md), [docs/pypi.md](docs/pypi.md), [docs/npm.md](docs/npm.md) (the formats `go`, `pypi`, `npm`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/access.md](docs/access.md) (how it works and why) |
 | watch it | [docs/metrics.md](docs/metrics.md) |
 | change it | [docs/testing.md](docs/testing.md), [docs/status.md](docs/status.md), [docs/README.md](docs/README.md) (the list of pages and their kinds) |
 
