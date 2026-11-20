@@ -35,6 +35,7 @@ All of `/api/v1/` needs a token (`401` without). Bodies are JSON; an unknown wor
 | `POST /api/v1/tokens` `{"account": "<name>", "scope": [{"repositories": [...], "paths": [...], "actions": [...]}], "life_seconds": 3600, "note": ""}` | a token with the action `admin` on `*` (for its own account; `account` left out means its own), an admin account for any account | makes a token. `201` with `{"token": "...", "info": {...}}`: **the only time the secret is shown**. `400` for a life that is missing or longer than the longest, for no scope, or a bad scope |
 | `GET /api/v1/tokens` (`?account=<name>`, `?all=1`) | the same; `account` of another and `all` need an admin account | lists tokens (never their secrets) |
 | `DELETE /api/v1/tokens/<id>` | the owner with such a token, or an admin account | revokes it, `204` |
+| `POST /api/v1/repositories/<name>/forget` (`?name=<key>`) | admin | for a proxy repository: clears what it remembers as "not found" (all of it, or the one key; the keys are `raw:<path>`, `manifest:<image>@<reference>`, `blob:<image>@<digest>`, `name:<image>`); with no `?name=` it also ends the pause after errors of its upstream. `200` with `{"repository", "forgotten": <rows>}`; `404` when the repository is not a proxy ([proxy.md](proxy.md)) |
 | `GET /api/v1/audit` (`?action=`, `?actor=`, `?limit=` up to 1000, `?before=<id>`) | admin | the audit log, newest first; `next` is the id to pass as `before` for the next page |
 | `GET /api/v1/repositories` | admin | the settings file as the program has it |
 

@@ -202,10 +202,10 @@ func (h *OCI) ingested(w http.ResponseWriter, q format.Request, image string, er
 // mount takes a blob of another name of the repository into this one, if the account may read the other. It says whether it answered.
 func (h *OCI) mount(w http.ResponseWriter, ctx context.Context, q format.Request, image, hex, from string) bool {
 	fromRepo, fromImage, _ := strings.Cut(from, "/")
-	if fromRepo != q.Repo.Name || CheckImage(fromRepo, fromImage) != nil || !q.Allowed(auth.Read, fromImage) {
+	if (fromRepo != q.Repo.Name && fromRepo != h.address(q)) || CheckImage(fromRepo, fromImage) != nil || !q.Allowed(auth.Read, fromImage) {
 		return false
 	}
-	size, found, err := h.linked(ctx, fromRepo, fromImage, hex)
+	size, found, err := h.linked(ctx, q.Repo.Name, fromImage, hex)
 	if err != nil || !found {
 		return false
 	}
@@ -424,6 +424,16 @@ func (h *OCI) finish(w http.ResponseWriter, r *http.Request, q format.Request, i
 
 	// Nothing came before: the body is the blob.
 	if len(parts) == 0 {
+		if !hasBody {
+			// An end with no body and no parts: either an empty blob, or an upload whose parts another end has just taken and committed. Only the row of the upload tells which.
+			if again, err := h.session(ctx, q, image, s.id); err != nil {
+				h.unavailable(w, err)
+				return
+			} else if again == nil {
+				h.fail(w, http.StatusNotFound, "BLOB_UPLOAD_UNKNOWN", "the upload is gone: it took too long, or another request ended it", nil)
+				return
+			}
+		}
 		up, err := h.Blobs.Ingest(ctx, r.Body, hex)
 		if !h.ingested(w, q, image, err) {
 			return

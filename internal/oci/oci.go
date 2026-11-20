@@ -21,6 +21,7 @@ import (
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/upstream"
 )
 
 // OCI is the handler of the repositories of the format oci.
@@ -35,6 +36,8 @@ type OCI struct {
 	Rate      int64
 	// Active is set to the number of downloads going on (nil: not shown).
 	Active *metrics.Gauge
+	// Up holds the clients of the upstreams of the proxy repositories (nil: there are none).
+	Up *upstream.Pool
 	// MaxManifest is the largest manifest taken in, in bytes (default 4 MiB, the figure of the specification).
 	MaxManifest int64
 	// UploadTTL is how long an upload in parts may take from its start to its end (default 24 hours).
@@ -157,6 +160,14 @@ func (h *OCI) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 		h.fail(w, http.StatusBadRequest, "NAME_INVALID", err.Error(), nil)
 		return
 	}
+	switch q.Repo.Kind {
+	case "group":
+		h.group(w, r, q, rt)
+		return
+	case "proxy":
+		h.proxy(w, r, q, rt)
+		return
+	}
 	switch rt.kind {
 	case kBlob:
 		h.blob(w, r, q, rt)
@@ -174,6 +185,7 @@ func (h *OCI) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 }
 
 func (h *OCI) fail(w http.ResponseWriter, status int, code, msg string, detail any) {
+	w.Header().Del("Content-Length") // a header set for an answer that was meant to be empty (an upload's) must not cut the error body: the server would then close the connection
 	format.WriteOCI(w, status, format.OCIError{Code: code, Message: msg, Detail: detail})
 }
 
@@ -197,12 +209,20 @@ func (h *OCI) unavailable(w http.ResponseWriter, err error) {
 	h.fail(w, http.StatusBadGateway, "UNAVAILABLE", "the store failed: try again", nil)
 }
 
+// name is the repository as the client wrote it in the address: the group, when the request was sent to a group.
+func (h *OCI) address(q format.Request) string {
+	if q.Address != "" {
+		return q.Address
+	}
+	return q.Repo.Name
+}
+
 func (h *OCI) event(q format.Request, action, image, tail, result, detail string) audit.Event {
 	return audit.Event{Actor: q.Actor(), Token: q.Principal.Token, Remote: q.Remote, Action: action, Repo: q.Repo.Name, Path: image + tail, Result: result, Detail: detail}
 }
 
 func (h *OCI) location(q format.Request, image, tail string) string {
-	return "/v2/" + q.Repo.Name + "/" + image + tail
+	return "/v2/" + h.address(q) + "/" + image + tail
 }
 
 // The owners of the references of a name. They are fixed by the name and the digest, so that taking the same blob twice is one reference, and no owner is left without a row.

@@ -107,6 +107,9 @@ func TestEveryWordOfTheSettingsFileIsInItsPage(t *testing.T) {
 			if f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Struct {
 				walk(f.Type.Elem())
 			}
+			if f.Type.Kind() == reflect.Ptr && f.Type.Elem().Kind() == reflect.Struct {
+				walk(f.Type.Elem())
+			}
 		}
 	}
 	walk(reflect.TypeOf(settings.Settings{}))
@@ -161,6 +164,35 @@ func TestTheOCIDoorIsInItsPage(t *testing.T) {
 	for _, code := range []string{"200", "201", "202", "204", "206", "400", "401", "403", "404", "405", "409", "413", "416", "502", "503"} {
 		if !strings.Contains(page, "`"+code) {
 			t.Errorf("the status %s is not in docs/oci.md", code)
+		}
+	}
+}
+
+// Every action that a proxy writes to the audit log, and every key under which a "not found" is remembered, is in docs/proxy.md; so is every word of the pause and the limits that the program has.
+func TestTheProxyPageNamesWhatItWrites(t *testing.T) {
+	page := read(t, "../../docs/proxy.md")
+	src := read(t, "../../internal/raw/proxy.go") + read(t, "../../internal/oci/proxy.go") + read(t, "../../internal/server/api.go")
+	for _, m := range regexp.MustCompile(`(?:Action: |event\(q, )"([a-z_]+)"`).FindAllStringSubmatch(src, -1) {
+		if m[1] == "put" || m[1] == "delete" {
+			continue
+		}
+		if !strings.Contains(page, "`"+m[1]+"`") && !strings.Contains(page, "action `"+m[1]+"`") {
+			t.Errorf("the audit action %q is not in docs/proxy.md", m[1])
+		}
+	}
+	for _, m := range regexp.MustCompile(`Miss(?:ed)?\([^"\n]*"([a-z]+):"`).FindAllStringSubmatch(src, -1) {
+		if !strings.Contains(page, "`"+m[1]+":") {
+			t.Errorf("the key %q: of the remembered misses is not in docs/proxy.md", m[1])
+		}
+	}
+	for _, w := range []string{"MinPause", "MaxPause"} {
+		if !strings.Contains(read(t, "../../internal/upstream/upstream.go"), w) {
+			t.Errorf("%s is gone from the program: change docs/proxy.md (5 seconds to 5 minutes)", w)
+		}
+	}
+	for _, w := range []string{"5 seconds", "5 minutes", "10m", "5m", "16", "2 hours"} {
+		if !strings.Contains(page+read(t, "../../docs/settings-file.md"), w) {
+			t.Errorf("the default %q is not in docs/proxy.md or docs/settings-file.md", w)
 		}
 	}
 }

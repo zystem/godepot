@@ -64,7 +64,7 @@ func (h *OCI) tags(w http.ResponseWriter, r *http.Request, q format.Request, rt 
 		w.Header().Set("Link", `<`+h.location(q, rt.image, "/tags/list?"+next.Encode())+`>; rel="next"`)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"name": q.Repo.Name + "/" + rt.image, "tags": list})
+	_ = json.NewEncoder(w).Encode(map[string]any{"name": h.address(q) + "/" + rt.image, "tags": list})
 }
 
 // referrers answers GET .../referrers/<digest>?artifactType=: an index of the manifests whose subject is the digest. The API is always there, so a client never falls back to the tag schema.

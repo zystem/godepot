@@ -30,6 +30,7 @@ import (
 	"github.com/zystem/godepot/internal/raw"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
+	"github.com/zystem/godepot/internal/upstream"
 )
 
 var version = "dev"
@@ -189,6 +190,7 @@ type appMetrics struct {
 	passes, passErrors, collected *metrics.Counter
 	reads, writes, deletes        *metrics.Counter
 	refused                       *metrics.Counter
+	upstream                      *upstream.Metrics
 	leader, up, active            *metrics.Gauge
 }
 
@@ -203,9 +205,15 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		writes:     reg.Counter("godepot_writes_total", "Files written (new or changed), by repository.", "repo"),
 		deletes:    reg.Counter("godepot_deletes_total", "Files deleted, by repository.", "repo"),
 		refused:    reg.Counter("godepot_refused_total", "Requests refused, by reason: unauthenticated, forbidden, conflict (a file is immutable), quota, digest (the bytes were not the ones named).", "reason"),
-		leader:     reg.Gauge("godepot_leader", "1 while this replica holds the lease of the background work, else 0."),
-		up:         reg.Gauge("godepot_up", "1 while the program is running."),
-		active:     reg.Gauge("godepot_downloads_active", "Files and blobs being sent to clients now (about 10 MiB of blobgate's memory each); the most is GODEPOT_MAX_DOWNLOADS."),
+		upstream: &upstream.Metrics{
+			Requests: reg.Counter("godepot_upstream_requests_total", "Requests sent to upstreams of proxy repositories, by repository.", "repo"),
+			Errors:   reg.Counter("godepot_upstream_errors_total", "Requests to upstreams that ended in an error, a 429 or a 5xx (each starts or lengthens a pause), and requests not sent because the upstream was paused, by repository.", "repo"),
+			Stale:    reg.Counter("godepot_upstream_stale_total", "Answers served from the cache, marked stale, because the upstream could not be asked, by repository.", "repo"),
+			Changed:  reg.Counter("godepot_upstream_changed_total", "Times an upstream gave other bytes for what cannot change (a digest, an immutable path), by repository: the cached bytes stay.", "repo"),
+		},
+		leader: reg.Gauge("godepot_leader", "1 while this replica holds the lease of the background work, else 0."),
+		up:     reg.Gauge("godepot_up", "1 while the program is running."),
+		active: reg.Gauge("godepot_downloads_active", "Files and blobs being sent to clients now (about 10 MiB of blobgate's memory each); the most is GODEPOT_MAX_DOWNLOADS."),
 	}
 	a.db = meta.NewRqlite(cfg.RqliteURL)
 	a.store = blobgate.New(cfg.BlobgateURL, cfg.Tenant, cfg.Secret, cfg.Store)
@@ -213,10 +221,11 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	a.auth = &auth.Store{DB: a.db, MaxLife: cfg.TokenMaxLife}
 	a.audit = &audit.Log{DB: a.db, Log: a.log}
 	gate := format.NewGate(cfg.MaxDownloads, 5*time.Second) // one for every door: what limits is the memory of blobgate
-	a.oci = &oci.OCI{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
+	pool := &upstream.Pool{DB: a.db, M: a.m.upstream}
+	a.oci = &oci.OCI{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
 		Downloads: gate, Rate: int64(cfg.MinRate), UploadTTL: cfg.UploadTTL}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
-		"raw": &raw.Raw{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
+		"raw": &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
 			Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active},
 		"oci": a.oci,
 	}}

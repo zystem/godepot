@@ -79,13 +79,17 @@ Every write and delete is a line of the audit log, in the transaction of the cha
 
 The blobs being sent at once are limited by `GODEPOT_MAX_DOWNLOADS` (64 by default; every download holds about 10 MiB of blobgate's memory, [step0-probes.md](step0-probes.md)). A download over the limit waits up to 5 seconds, then gets `503` with `Retry-After: 5`. A client that takes less than `GODEPOT_MIN_DOWNLOAD_RATE` bytes a second (8192 by default; 0 for no least) is ended: each write must be taken within ten seconds plus the time its size takes at that speed. The limit is shared with the format `raw`.
 
+## Proxy and group
+
+An `oci` repository may be a `proxy` (a copy, on demand, of another registry: Docker Hub, GitHub's, your own) or a `group` (hosted and proxy repositories under one name). Pulling `docker pull HOST/<proxy>/library/alpine:3.20` fetches from the upstream on the first ask and serves from the cache after. What each does, with its defaults, is in [proxy.md](proxy.md); the settings are in [settings-file.md](settings-file.md). A group answers a request for an image from one member (the first that has it), a push to a group goes to its `write_to`, and the `Location` of an upload names the group. A proxy is read-only: a push to it is `405` `UNSUPPORTED`.
+
 ## Not done
 
 - **Deleting a blob** (`405`); blobs go with a cleanup that is step 7. Until then the layers of deleted images stay.
 - **Mounting from another repository**, and the automatic mount when `from` is left out (an upload is started instead).
 - **`/v2/_catalog`** (`404`: no repository is called `_catalog`).
 - **Quotas** for an OCI repository: the file is refused when it sets one.
-- Proxy and group repositories (step 5); TLS on the port of the program (the OCI clients refuse plain HTTP, except `localhost` for some, so put a proxy that serves TLS in front, or add the registry to the insecure ones of the client).
+- TLS on the port of the program (the OCI clients refuse plain HTTP, except `localhost` for some, so put a proxy that serves TLS in front, or add the registry to the insecure ones of the client).
 - Docker's manifests of schema 1, and digests other than SHA-256.
 
 ## What was run

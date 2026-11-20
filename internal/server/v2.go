@@ -46,7 +46,7 @@ func (s *Server) v2(w http.ResponseWriter, r *http.Request) {
 	}
 	rem := remote(r)
 	f.Serve(w, r, format.Request{
-		Repo: repo, Path: path, Principal: p, Remote: rem,
+		Repo: repo, Path: path, Principal: p, Remote: rem, Set: set, Address: repo.Name,
 		Authorize: func(w http.ResponseWriter, action, path string) bool {
 			return s.authorize(w, r.Context(), set, p, rem, repo.Name, path, action, format.RefuseOCI)
 		},
