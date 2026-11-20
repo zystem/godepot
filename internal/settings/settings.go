@@ -14,7 +14,7 @@ import (
 )
 
 // Formats that exist. A format is added here when its door is built.
-var formats = map[string]bool{"raw": true}
+var formats = map[string]bool{"raw": true, "oci": true}
 
 // Repo is one repository.
 type Repo struct {
@@ -26,9 +26,21 @@ type Repo struct {
 	AnonymousRead bool `json:"anonymous_read,omitempty"`
 	// OverwritePaths are the patterns of the paths that may be written again with other bytes. Default none: a path, once written, is immutable (docs/spec.md, R4).
 	OverwritePaths []string `json:"overwrite_paths,omitempty"`
+	// ImmutableTags are the patterns of the tags of an OCI repository that, once they name a manifest, never name another (R4). Default none: a tag may move. Only for the format oci.
+	ImmutableTags []string `json:"immutable_tags,omitempty"`
 	// QuotaBytes and QuotaComponents are the limits of the repository (R7); 0 is no limit.
 	QuotaBytes      int64 `json:"quota_bytes,omitempty"`
 	QuotaComponents int64 `json:"quota_components,omitempty"`
+}
+
+// ImmutableTag says whether the tag may not be moved.
+func (r *Repo) ImmutableTag(tag string) bool {
+	for _, p := range r.ImmutableTags {
+		if auth.Match(p, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // Overwrites says whether the path may be written again.
@@ -103,7 +115,7 @@ func (s *Settings) Check() error {
 		}
 		seen[r.Name] = true
 		if !formats[r.Format] {
-			add("%s: the format %q is not known (known: raw)", who, r.Format)
+			add("%s: the format %q is not known (known: raw, oci)", who, r.Format)
 		}
 		switch r.Kind {
 		case "hosted":
@@ -111,6 +123,21 @@ func (s *Settings) Check() error {
 			add("%s: kind %q is not built yet (only hosted)", who, r.Kind)
 		default:
 			add("%s: kind %q is not known: use hosted", who, r.Kind)
+		}
+		if r.Format == "oci" {
+			if len(r.OverwritePaths) > 0 {
+				add("%s: overwrite_paths is for the format raw; an OCI repository has immutable_tags", who)
+			}
+			if r.QuotaBytes != 0 || r.QuotaComponents != 0 {
+				add("%s: a quota is not built for the format oci yet", who)
+			}
+			for _, p := range r.ImmutableTags {
+				if err := auth.CheckPattern(p); err != nil {
+					add("%s: immutable_tags: %v", who, err)
+				}
+			}
+		} else if len(r.ImmutableTags) > 0 {
+			add("%s: immutable_tags is for the format oci", who)
 		}
 		if r.QuotaBytes < 0 || r.QuotaComponents < 0 {
 			add("%s: a quota is negative", who)

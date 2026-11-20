@@ -18,6 +18,8 @@ type Request struct {
 	Remote    string
 	// Authorize says whether the principal may do the action on the path. When it may not, the answer to the client (401 or 403) has been written and audited, and the format returns.
 	Authorize func(w http.ResponseWriter, action, path string) bool
+	// Allowed says the same as Authorize without answering the client, for a format that asks about another path than the one of the request (the source of an OCI mount).
+	Allowed func(action, path string) bool
 }
 
 // Format answers the requests of the repositories of one format.

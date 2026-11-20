@@ -115,6 +115,69 @@ var steps = [][]string{
 		)`,
 		`CREATE INDEX audit_at ON audit (at)`,
 	},
+	// 4: the format oci (internal/oci). A name is "<repository>/<image>"; a blob, a manifest and a tag belong to a name. A blob of a name holds the blob of the layer under the owner 'ociblob:<repo>/<image>@<digest>'.
+	4: {
+		// The blobs a name has: pushed to it, or mounted into it. Only a name that has a blob may read it.
+		`CREATE TABLE oci_blobs (
+			repo TEXT NOT NULL,
+			image TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY (repo, image, digest)
+		) WITHOUT ROWID`,
+		// A manifest of a name. body holds it up to 256 KiB; a larger one is a blob that the owner 'ocimanifest:<repo>/<image>@<digest>' holds (body is NULL). subject is the digest a referrer names, or ''.
+		`CREATE TABLE oci_manifests (
+			repo TEXT NOT NULL,
+			image TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			media_type TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			body TEXT,
+			subject TEXT NOT NULL DEFAULT '',
+			artifact_type TEXT NOT NULL DEFAULT '',
+			annotations TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY (repo, image, digest)
+		) WITHOUT ROWID`,
+		`CREATE INDEX oci_manifests_subject ON oci_manifests (repo, image, subject) WHERE subject <> ''`,
+		`CREATE TABLE oci_tags (
+			repo TEXT NOT NULL,
+			image TEXT NOT NULL,
+			tag TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (repo, image, tag)
+		) WITHOUT ROWID`,
+		`CREATE INDEX oci_tags_digest ON oci_tags (repo, image, digest)`,
+		// What a manifest needs: kind 'child' (a manifest an index names) or 'blob' (its config and layers). Nothing that a link names is removed while the manifest stays (docs/spec.md, C5).
+		`CREATE TABLE oci_links (
+			repo TEXT NOT NULL,
+			image TEXT NOT NULL,
+			from_digest TEXT NOT NULL,
+			to_digest TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('child', 'blob')),
+			PRIMARY KEY (repo, image, from_digest, to_digest, kind)
+		) WITHOUT ROWID`,
+		`CREATE INDEX oci_links_to ON oci_links (repo, image, to_digest)`,
+		// An upload in parts, from POST to the PUT that ends it. Each part is a blob held under the owner 'ociupload:<id>'.
+		`CREATE TABLE oci_uploads (
+			id TEXT PRIMARY KEY,
+			repo TEXT NOT NULL,
+			image TEXT NOT NULL,
+			started INTEGER NOT NULL,
+			size INTEGER NOT NULL DEFAULT 0,
+			parts INTEGER NOT NULL DEFAULT 0
+		) WITHOUT ROWID`,
+		`CREATE TABLE oci_parts (
+			upload_id TEXT NOT NULL,
+			n INTEGER NOT NULL,
+			digest TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			PRIMARY KEY (upload_id, n)
+		) WITHOUT ROWID`,
+	},
 }
 
 // Version is the number of the schema this program writes.

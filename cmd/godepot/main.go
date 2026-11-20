@@ -26,6 +26,7 @@ import (
 	"github.com/zystem/godepot/internal/lease"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/oci"
 	"github.com/zystem/godepot/internal/raw"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
@@ -175,6 +176,7 @@ type app struct {
 	db     *meta.Rqlite
 	store  *blobgate.Store
 	layer  *blob.Layer
+	oci    *oci.OCI
 	lease  *lease.Lease
 	m      *appMetrics
 	reg    *metrics.Registry
@@ -187,7 +189,7 @@ type appMetrics struct {
 	passes, passErrors, collected *metrics.Counter
 	reads, writes, deletes        *metrics.Counter
 	refused                       *metrics.Counter
-	leader, up                    *metrics.Gauge
+	leader, up, active            *metrics.Gauge
 }
 
 func newApp(cfg *Config, out, errOut io.Writer) *app {
@@ -203,14 +205,20 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		refused:    reg.Counter("godepot_refused_total", "Requests refused, by reason: unauthenticated, forbidden, conflict (a file is immutable), quota, digest (the bytes were not the ones named).", "reason"),
 		leader:     reg.Gauge("godepot_leader", "1 while this replica holds the lease of the background work, else 0."),
 		up:         reg.Gauge("godepot_up", "1 while the program is running."),
+		active:     reg.Gauge("godepot_downloads_active", "Files and blobs being sent to clients now (about 10 MiB of blobgate's memory each); the most is GODEPOT_MAX_DOWNLOADS."),
 	}
 	a.db = meta.NewRqlite(cfg.RqliteURL)
 	a.store = blobgate.New(cfg.BlobgateURL, cfg.Tenant, cfg.Secret, cfg.Store)
 	a.layer = &blob.Layer{DB: a.db, Store: a.store, Grace: cfg.Grace, UploadTTL: cfg.UploadTTL}
 	a.auth = &auth.Store{DB: a.db, MaxLife: cfg.TokenMaxLife}
 	a.audit = &audit.Log{DB: a.db, Log: a.log}
+	gate := format.NewGate(cfg.MaxDownloads, 5*time.Second) // one for every door: what limits is the memory of blobgate
+	a.oci = &oci.OCI{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
+		Downloads: gate, Rate: int64(cfg.MinRate), UploadTTL: cfg.UploadTTL}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
-		"raw": &raw.Raw{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused},
+		"raw": &raw.Raw{Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
+			Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active},
+		"oci": a.oci,
 	}}
 	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte
@@ -446,6 +454,15 @@ func (a *app) pass(ctx context.Context) {
 		return
 	}
 	a.m.leader.Set(1)
+	if n, err := a.oci.Sweep(ctx, a.cfg.CollectBatch); err != nil {
+		a.m.passErrors.Add("", 1)
+		if ctx.Err() == nil {
+			a.log.Error("the sweep of OCI uploads failed", "error", err.Error())
+		}
+	} else if n > 0 {
+		a.m.collected.Add("oci_uploads", int64(n))
+		a.log.Info("collected", "oci_uploads", n)
+	}
 	for i := 0; i < 20 && ctx.Err() == nil; i++ { // a full batch means there is more: go on at once, but give the lease a turn
 		got, err := a.layer.Collect(ctx, a.cfg.CollectBatch)
 		a.m.passes.Add("", 1)

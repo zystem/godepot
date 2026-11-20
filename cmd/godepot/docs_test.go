@@ -138,3 +138,29 @@ func TestTheAPIAndTheFormatAreInTheirPages(t *testing.T) {
 		}
 	}
 }
+
+// Every error code, every route and every media type of the OCI door is in docs/oci.md.
+func TestTheOCIDoorIsInItsPage(t *testing.T) {
+	page := read(t, "../../docs/oci.md")
+	src := goFiles(t, "../../internal/oci", false) + read(t, "../../internal/format/oci_errors.go")
+	for _, m := range regexp.MustCompile(`"([A-Z]+_[A-Z_]+|UNSUPPORTED|UNAVAILABLE|DENIED|UNAUTHORIZED)"`).FindAllStringSubmatch(src, -1) {
+		if !strings.Contains(page, m[1]) {
+			t.Errorf("the error code %s is not in docs/oci.md", m[1])
+		}
+	}
+	for _, m := range regexp.MustCompile(`"(application/vnd\.[a-z0-9.+-]+)"`).FindAllStringSubmatch(src, -1) {
+		if !strings.Contains(page, m[1]) {
+			t.Errorf("the media type %s is not in docs/oci.md", m[1])
+		}
+	}
+	for _, r := range []string{"/blobs/", "/blobs/uploads/", "/manifests/", "/tags/list", "/referrers/", "immutable_tags", "GODEPOT_MAX_DOWNLOADS", "GODEPOT_MIN_DOWNLOAD_RATE", "Docker-Content-Digest", "OCI-Subject", "OCI-Filters-Applied", "Docker-Upload-UUID", "Content-Range", "Retry-After"} {
+		if !strings.Contains(page, r) {
+			t.Errorf("%s is not in docs/oci.md", r)
+		}
+	}
+	for _, code := range []string{"200", "201", "202", "204", "206", "400", "401", "403", "404", "405", "409", "413", "416", "502", "503"} {
+		if !strings.Contains(page, "`"+code) {
+			t.Errorf("the status %s is not in docs/oci.md", code)
+		}
+	}
+}

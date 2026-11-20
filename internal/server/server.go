@@ -32,11 +32,12 @@ type Server struct {
 const (
 	repoPrefix = "/repository/"
 	apiPrefix  = "/api/v1/"
+	v2Prefix   = "/v2/"
 )
 
 // Handles says whether the address is one of this door's (the rest is for the caller's own mux).
 func Handles(path string) bool {
-	return strings.HasPrefix(path, repoPrefix) || strings.HasPrefix(path, apiPrefix)
+	return strings.HasPrefix(path, repoPrefix) || strings.HasPrefix(path, apiPrefix) || path == "/v2" || strings.HasPrefix(path, v2Prefix)
 }
 
 // ServeHTTP answers a request whose address Handles.
@@ -46,6 +47,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.repository(w, r)
 	case strings.HasPrefix(r.URL.Path, apiPrefix):
 		s.api(w, r)
+	case r.URL.Path == "/v2" || strings.HasPrefix(r.URL.Path, v2Prefix):
+		s.v2(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -63,6 +66,9 @@ func reply(w http.ResponseWriter, code int, v any) {
 }
 
 func fail(w http.ResponseWriter, code int, msg string) { reply(w, code, problem{Error: msg}) }
+
+// refuser writes an answer that refuses a request, in the words of the door's own protocol (JSON with "error", or the "errors" list of the OCI distribution API).
+type refuser func(w http.ResponseWriter, code int, msg string)
 
 func remote(r *http.Request) string {
 	h, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -97,13 +103,13 @@ func token(r *http.Request) (tok string, present, ok bool) {
 	return "", true, false
 }
 
-func unauthorized(w http.ResponseWriter) {
+func unauthorized(w http.ResponseWriter, refuse refuser) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="godepot", charset="UTF-8"`)
-	fail(w, http.StatusUnauthorized, "a token is needed: send it as the password of basic authentication or as a bearer token")
+	refuse(w, http.StatusUnauthorized, "a token is needed: send it as the password of basic authentication or as a bearer token")
 }
 
 // principal finds who the request is from. It answers 401 itself (and audits it) when a token is sent and is not good; the principal is then nil.
-func (s *Server) principal(w http.ResponseWriter, r *http.Request) *auth.Principal {
+func (s *Server) principal(w http.ResponseWriter, r *http.Request, refuse refuser) *auth.Principal {
 	tok, present, ok := token(r)
 	if !present {
 		return &auth.Principal{}
@@ -120,12 +126,12 @@ func (s *Server) principal(w http.ResponseWriter, r *http.Request) *auth.Princip
 	if err != nil {
 		var inv = errors.Is(err, auth.ErrInvalid) || !ok
 		if !inv {
-			fail(w, http.StatusServiceUnavailable, "the database is not available: try again")
+			refuse(w, http.StatusServiceUnavailable, "the database is not available: try again")
 			return nil
 		}
 		s.count("unauthenticated")
 		s.Audit.Record(r.Context(), audit.Event{Remote: remote(r), Action: "auth", Result: audit.Refused, Detail: err.Error()})
-		unauthorized(w)
+		unauthorized(w, refuse)
 		return nil
 	}
 	return p
@@ -153,7 +159,7 @@ func (s *Server) repository(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotImplemented, "this format has no door yet")
 		return
 	}
-	p := s.principal(w, r)
+	p := s.principal(w, r, fail)
 	if p == nil {
 		return
 	}
@@ -161,13 +167,14 @@ func (s *Server) repository(w http.ResponseWriter, r *http.Request) {
 	f.Serve(w, r, format.Request{
 		Repo: repo, Path: path, Principal: p, Remote: rem,
 		Authorize: func(w http.ResponseWriter, action, path string) bool {
-			return s.authorize(w, r.Context(), set, p, rem, repo.Name, path, action)
+			return s.authorize(w, r.Context(), set, p, rem, repo.Name, path, action, fail)
 		},
+		Allowed: func(action, path string) bool { return set.Allows(p, repo.Name, path, action) },
 	})
 }
 
 // authorize checks one action and, when it is refused, answers (401 for a request with no token, 403 for one with a token) and audits it.
-func (s *Server) authorize(w http.ResponseWriter, ctx context.Context, set *settings.Settings, p *auth.Principal, rem, repo, path, action string) bool {
+func (s *Server) authorize(w http.ResponseWriter, ctx context.Context, set *settings.Settings, p *auth.Principal, rem, repo, path, action string, refuse refuser) bool {
 	if set.Allows(p, repo, path, action) {
 		return true
 	}
@@ -182,9 +189,9 @@ func (s *Server) authorize(w http.ResponseWriter, ctx context.Context, set *sett
 	s.count(reason)
 	s.Audit.Record(ctx, audit.Event{Actor: actor, Token: tok, Remote: rem, Action: action, Repo: repo, Path: path, Result: audit.Refused, Detail: reason})
 	if p.Anonymous() {
-		unauthorized(w)
+		unauthorized(w, refuse)
 	} else {
-		fail(w, http.StatusForbidden, "this token may not "+action+" here")
+		refuse(w, http.StatusForbidden, "this token may not "+action+" here")
 	}
 	return false
 }

@@ -28,6 +28,9 @@ type Config struct {
 	ConfigFile string
 	// TokenMaxLife is the longest life a token may have.
 	TokenMaxLife time.Duration
+	// MaxDownloads is how many blobs may be sent at once (docs/spec.md, P11); MinRate is the least speed of a client in bytes a second, 0 for none.
+	MaxDownloads int
+	MinRate      int
 }
 
 // getenv reads NAME, or the contents of the file that NAME_FILE names (a secret kept out of the environment of the process). Both set is an error.
@@ -107,6 +110,8 @@ func loadConfig(env func(string) string) (*Config, error) {
 	c.CollectBatch = num("GODEPOT_COLLECT_BATCH", 200, 1)
 	c.ConfigFile = env("GODEPOT_CONFIG_FILE")
 	c.TokenMaxLife = time.Duration(num("GODEPOT_TOKEN_MAX_DAYS", 90, 1)) * 24 * time.Hour
+	c.MaxDownloads = num("GODEPOT_MAX_DOWNLOADS", 64, 1)
+	c.MinRate = num("GODEPOT_MIN_DOWNLOAD_RATE", 8192, 0)
 	if c.LeaseTTL > 0 && c.CollectEvery > 0 && c.LeaseTTL < 2*c.CollectEvery {
 		add(fmt.Errorf("GODEPOT_LEASE_SECONDS (%d) is less than twice GODEPOT_COLLECT_SECONDS (%d): the lease would run out between two renewals", c.LeaseTTL/time.Second, c.CollectEvery/time.Second))
 	}
