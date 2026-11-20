@@ -42,6 +42,27 @@ podman       skipped  not installed
 
 (That is the output of 2026-11-20; the `docker` line is cut. The clients need the network: they copy `alpine` from a public registry.) `tools/ocibig` pushes and pulls a big layer through a running program and reads its memory ([oci.md](oci.md) has the figures): `go run ./tools/ocibig -url http://127.0.0.1:18100 -token $T -name reg/big -pid $(pgrep -f 'godepot serve') -mib 10240`.
 
+## Proxy and group: false upstreams, and the program against real ones
+
+`go test -p 1 ./internal/proxytest` (with the stand's variables) runs the proxy and group repositories of `raw` and `oci` against **false upstreams**, servers of the test that count what they are asked: one that is slow and streams, one that dies in the middle of a body, one that answers `429` with `Retry-After` or `500`, one that gives other bytes under a digest, one that answers `401` for a name, one that asks for a bearer token from a service on another host. The clock of the test is moved to cross a pause or a time to live. Each guard was **taken out on purpose** to see that its test fails (claims, joined fetches, the refusal of private addresses, the held-back last byte, the growing pause, the immutable paths, the negative cache). 100 clients that ask one cold layer make one fetch.
+
+`tools/test/proxy-run.sh` runs the program against a real blobgate and rqlite (the stand) and prints one line for each of: a layer of `PROXY_BIG_MIB` MiB (default 5120) through a false registry that sends `PROXY_RATE` MiB a second (default 100); `PROXY_CLIENTS` clients (default 100) that ask a cold layer of `PROXY_COLD_MIB` MiB (default 512); `crane` through a proxy of **Docker Hub**, twice; a group; a raw proxy of `raw.githubusercontent.com`. `PROXY_SKIP_BIG=1` skips the first two. It uses names of repositories of its own for each run, because the stand keeps what an earlier run cached.
+
+```bash
+eval "$(tools/test/blobgate-stand.sh start)"
+tools/test/proxy-run.sh
+```
+
+```
+big      ok       cold pull: first byte after 11ms, the whole layer after 51.287s, digest equal: true; the false registry was asked for the layer 1 time(s); memory of godepot: peak 15708 kB ...
+cold     ok       100 clients asked the cold layer: 100 got the whole layer with the right digest, 0 did not (35 answers of 503 with Retry-After were retried); the false registry was asked for the layer 1 time(s); all done after 23.089s; memory of godepot: peak 33180 kB
+hub      ok       alpine:3.20 pulled through the proxy of Docker Hub (digest sha256:d9e853e8...); the second pull sent no request upstream (4 requests in all)
+group    ok       crane copy to the group went to its write_to (mine); the same image and a public one are read through the group
+raw      ok       a file of raw.githubusercontent.com asked twice: one request upstream
+```
+
+That is the output of 2026-11-20 (the lines are cut where they end in `...`). Read it as: a **5 GiB** layer sent at 100 MiB a second by the upstream reached the client's first byte after **11 ms** and its last after 51 s, with the digest equal, while godepot held **16 MiB**; asked again it came from the store in 11 s with no word to the upstream. **100 clients** asking one cold 512 MiB layer made **one** fetch; every one got the right bytes; 35 were told `503`, `Retry-After: 5` (the limit of 64 downloads at once, [configuration.md](configuration.md)) and did as a client does, and godepot peaked at 33 MiB. **Not run:** the same through two replicas, a slow or failing node of blobgate, `docker` and `podman`.
+
 ## What the variables do
 
 | Variable | Meaning |

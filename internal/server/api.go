@@ -12,6 +12,7 @@ import (
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/meta"
+	"github.com/zystem/godepot/internal/upstream"
 )
 
 // The API of accounts, tokens and the audit log. Who may do what:
@@ -49,9 +50,30 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reply(w, http.StatusOK, s.Settings.Load())
+	case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "forget" && r.Method == http.MethodPost:
+		s.forget(w, r, p, parts[1])
 	default:
 		fail(w, http.StatusNotFound, "no such call")
 	}
+}
+
+// forget clears what a proxy repository remembers as missing, and ends the pause after errors of its upstream (docs/spec.md, P4): all of it, or the one name given as ?name=.
+func (s *Server) forget(w http.ResponseWriter, r *http.Request, p *auth.Principal, repo string) {
+	if !s.admin(w, r, p, "forget") {
+		return
+	}
+	set := s.Settings.Load()
+	if set == nil || set.Repo(repo) == nil || set.Repo(repo).Kind != "proxy" {
+		fail(w, http.StatusNotFound, "no such proxy repository")
+		return
+	}
+	n, err := upstream.Forget(r.Context(), s.Auth.DB, repo, r.URL.Query().Get("name"))
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "the database is not available: try again")
+		return
+	}
+	s.Audit.Record(r.Context(), s.event(r, p, "forget", audit.OK, repo))
+	reply(w, http.StatusOK, map[string]any{"repository": repo, "forgotten": n})
 }
 
 // admin checks that the principal is an admin account with a token that has admin on everything; otherwise it answers 403 and audits.

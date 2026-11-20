@@ -12,7 +12,11 @@ Reference. Served at `/metrics` on `GODEPOT_METRICS_PORT` ([configuration.md](co
 | `godepot_reads_total{repo}` | counter | files, blobs and manifests read (a `GET` that sent bytes), by repository |
 | `godepot_writes_total{repo}` | counter | files written, new or changed, by repository (the same bytes again are not counted) |
 | `godepot_deletes_total{repo}` | counter | files deleted, by repository |
-| `godepot_refused_total{reason}` | counter | requests refused: `unauthenticated` (401), `forbidden` (403), `conflict` (a file is immutable), `quota`, `digest` (the bytes were not the ones the client named), `busy` (more downloads at once than `GODEPOT_MAX_DOWNLOADS`) |
+| `godepot_refused_total{reason}` | counter | requests refused: `unauthenticated` (401), `forbidden` (403), `conflict` (a file is immutable), `quota`, `digest` (the bytes were not the ones the client named), `busy` (more downloads at once than `GODEPOT_MAX_DOWNLOADS`), `upstream` (a proxy could not be served by its upstream: paused, failed, or refused its credentials) |
 | `godepot_downloads_active` | gauge | blobs and files being sent now; never above `GODEPOT_MAX_DOWNLOADS`. Set when a download starts and when it ends |
+| `godepot_upstream_requests_total{repo}` | counter | requests sent to the upstream of a proxy repository (not the ones held back by a pause) |
+| `godepot_upstream_errors_total{repo}` | counter | requests that ended in an error, a `429` or a `5xx` (each starts or lengthens the pause of the upstream), and requests not sent because the upstream was paused ([proxy.md](proxy.md)) |
+| `godepot_upstream_stale_total{repo}` | counter | answers served from the cache, with `Warning: 110`, because the upstream could not be asked |
+| `godepot_upstream_changed_total{repo}` | counter | times an upstream gave other bytes for what cannot change: a blob or a manifest by digest, a raw file in `immutable_paths`. The cached bytes stay. It is an alarm |
 
 Not there yet: bytes and latency of requests, the size of the store, the age of the oldest unnamed blob, the result of `reconcile`.

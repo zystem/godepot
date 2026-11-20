@@ -18,6 +18,10 @@ type Request struct {
 	Remote    string
 	// Authorize says whether the principal may do the action on the path. When it may not, the answer to the client (401 or 403) has been written and audited, and the format returns.
 	Authorize func(w http.ResponseWriter, action, path string) bool
+	// Set is the settings that the request was served under (the members of a group are found in it); Address is the repository as the client named it in the address, which is the group when the
+	// request was sent to a group and Repo has been replaced by the member that answers.
+	Set     *settings.Settings
+	Address string
 	// Allowed says the same as Authorize without answering the client, for a format that asks about another path than the one of the request (the source of an OCI mount).
 	Allowed func(action, path string) bool
 }

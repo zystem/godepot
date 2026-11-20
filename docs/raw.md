@@ -57,6 +57,10 @@ Needs `delete`. `204`, or `404` when there is no such file. The file is gone at 
 
 Every write, every delete and every refusal is a line of the audit log ([api.md](api.md)); a change and its line are written in one transaction, so there is no change without its line. Reads are counted ([metrics.md](metrics.md)) and not audited.
 
+## Proxy and group
+
+A `raw` repository may be a `proxy` (a copy, on demand, of the files of a web server: the first `GET` fetches and keeps, the next ones do not ask) or a `group` (hosted and proxy repositories under one name; a `PUT` to it goes to `write_to`). The requests are the same; a `PUT` or a `DELETE` of a proxy is `405`, and a listing of a proxy is `404`. Everything else (time to live, stale answers, what is remembered as missing, the guard against a name of yours being served from an upstream) is in [proxy.md](proxy.md).
+
 ## Not there yet
 
 Setting properties after the upload and searching across repositories (spec R6: at upload and in a listing only); a trash; promotion; redirects to presigned addresses; `HEAD` of a directory counts as a listing.

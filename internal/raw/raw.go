@@ -20,6 +20,7 @@ import (
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/upstream"
 )
 
 // Raw is the handler of the repositories of the format raw.
@@ -33,6 +34,8 @@ type Raw struct {
 	Downloads *format.Gate
 	Rate      int64
 	Active    *metrics.Gauge
+	// Up holds the clients of the upstreams of the proxy repositories (nil: there are none).
+	Up *upstream.Pool
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 }
@@ -92,6 +95,14 @@ func (h *Raw) count(c *metrics.Counter, label string) {
 
 // Serve answers one request.
 func (h *Raw) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
+	switch q.Repo.Kind {
+	case "group":
+		h.group(w, r, q)
+		return
+	case "proxy":
+		h.proxy(w, r, q)
+		return
+	}
 	switch r.Method {
 	case http.MethodPut:
 		h.put(w, r, q)
@@ -111,19 +122,19 @@ func (h *Raw) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 
 // asset is a row of assets with the properties of its component.
 type asset struct {
-	id, component, digest, contentType string
-	size, created                      int64
-	props                              map[string]string
+	id, component, digest, contentType, etag string
+	size, created, checked                   int64
+	props                                    map[string]string
 }
 
 func (h *Raw) find(ctx context.Context, repo, path string) (*asset, error) {
-	rows, err := h.DB.Query(ctx, meta.S(`SELECT a.id, a.component_id, a.digest, a.size, a.content_type, a.created_at, c.props
+	rows, err := h.DB.Query(ctx, meta.S(`SELECT a.id, a.component_id, a.digest, a.size, a.content_type, a.created_at, c.props, a.etag, a.checked_at
 		FROM assets a JOIN components c ON c.id = a.component_id WHERE a.repo = ? AND a.path = ?`, repo, path))
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
 	r := rows[0]
-	a := &asset{id: meta.Str(r[0]), component: meta.Str(r[1]), digest: meta.Str(r[2]), size: meta.Int(r[3]), contentType: meta.Str(r[4]), created: meta.Int(r[5]), props: map[string]string{}}
+	a := &asset{id: meta.Str(r[0]), component: meta.Str(r[1]), digest: meta.Str(r[2]), size: meta.Int(r[3]), contentType: meta.Str(r[4]), created: meta.Int(r[5]), props: map[string]string{}, etag: meta.Str(r[7]), checked: meta.Int(r[8])}
 	_ = json.Unmarshal([]byte(meta.Str(r[6])), &a.props)
 	return a, nil
 }
@@ -258,6 +269,7 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 		stmts = append(stmts,
 			meta.S(`INSERT INTO assets (id, component_id, repo, path, digest, size, content_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, component, q.Repo.Name, path, up.Digest, up.Size, ct, h.nowUnix()))
 		stmts = append(stmts, h.Blobs.Done(up)...)
+		stmts = append(stmts, format.ClaimStmts(q.Set, q.Repo.Name, path)...) // a name that is published is claimed in the groups that hold this repository (R3)
 		ev := h.event(q, "put", path, audit.OK, fmt.Sprintf("%s %d", up.Digest, up.Size))
 		stmts = append(stmts, h.Audit.Stmt(ev))
 		if _, err := h.DB.Exec(ctx, stmts...); err != nil {

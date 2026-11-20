@@ -2,7 +2,7 @@
 
 **godepot is a repository manager (packages and images for `docker`, `mvn`, `npm`, `pip`, `go`, `apt`) that keeps every byte in [blobgate](https://github.com/zystem/blobgate), once, and frees the disk by itself.**
 
-> **Status, 2026-11-20: early. Two formats are served: `raw`** (files by path, with `curl`) and **`oci`** (images, Helm charts and any artifact, for `helm`, `oras`, `crane`, `skopeo`, `cosign`: [docs/oci-clients.md](docs/oci-clients.md); `docker` and `podman` were not run), with accounts, tokens and an audit log. `npm`, `mvn`, `pip` and the others cannot talk to this release yet: those formats are steps 6 to 9 of the plan. What is built is the hard part that other products get wrong, the layer that keeps bytes by their SHA-256, knows who needs them and collects what nobody needs while the service serves ([docs/blob-layer.md](docs/blob-layer.md)), and the first door on top of it. The specification and the plan are in [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md); [docs/status.md](docs/status.md) says what is built and what was run.
+> **Status, 2026-11-20: early. Two formats are served: `raw`** (files by path, with `curl`) and **`oci`** (images, Helm charts and any artifact, for `helm`, `oras`, `crane`, `skopeo`, `cosign`: [docs/oci-clients.md](docs/oci-clients.md); `docker` and `podman` were not run), with accounts, tokens and an audit log, and **proxy and group repositories** for both (a copy on demand of Docker Hub or a web server, and one address for what is yours and what is public, with a guard against a public package taking the name of one of yours: [docs/proxy-howto.md](docs/proxy-howto.md)). `npm`, `mvn`, `pip` and the others cannot talk to this release yet: those formats are steps 6 to 9 of the plan. What is built is the hard part that other products get wrong, the layer that keeps bytes by their SHA-256, knows who needs them and collects what nobody needs while the service serves ([docs/blob-layer.md](docs/blob-layer.md)), and the first door on top of it. The specification and the plan are in [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md); [docs/status.md](docs/status.md) says what is built and what was run.
 
 ## When to use it, and when not
 
@@ -144,7 +144,7 @@ Two blobs, not one: the bytes of the refused write (`bye`) were taken in and are
 
 Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown. The outputs are the ones that run printed, except the lines said above to be cut, and the token, which is different every time (the first 20 characters were `gd_a839e93446e7_bY9t`); the `created_at` and the end date are those of that run. Not run by a test: a test that runs this page is still to do. Remove it all with `docker rm -f godepot blobgate bg-rq gd-rq`.
 
-**Next:** [docs/oci-clients.md](docs/oci-clients.md) (the same account and token push images and charts), [docs/raw.md](docs/raw.md) (every request of the format), [docs/access.md](docs/access.md) (accounts, scopes: why it is so), [docs/api.md](docs/api.md) (the API, the audit log).
+**Next:** [docs/proxy-howto.md](docs/proxy-howto.md) (a proxy of Docker Hub and a group), [docs/oci-clients.md](docs/oci-clients.md) (the same account and token push images and charts), [docs/raw.md](docs/raw.md) (every request of the format), [docs/access.md](docs/access.md) (accounts, scopes: why it is so), [docs/api.md](docs/api.md) (the API, the audit log).
 
 ## Ways to install
 
@@ -173,7 +173,7 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 | know what it will be | [docs/spec.md](docs/spec.md), [docs/plan.md](docs/plan.md) (with the traps of other products, and the way round each) |
 | know how bytes are kept, and what a crash leaves | [docs/blob-layer.md](docs/blob-layer.md) |
 | set it up | [docs/configuration.md](docs/configuration.md) (every setting, command and exit code), [docs/settings-file.md](docs/settings-file.md) (repositories and grants) |
-| connect | [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/access.md](docs/access.md) (how it works and why) |
+| connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/access.md](docs/access.md) (how it works and why) |
 | watch it | [docs/metrics.md](docs/metrics.md) |
 | change it | [docs/testing.md](docs/testing.md), [docs/status.md](docs/status.md), [docs/README.md](docs/README.md) (the list of pages and their kinds) |
 

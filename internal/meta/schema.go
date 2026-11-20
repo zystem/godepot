@@ -178,6 +178,29 @@ var steps = [][]string{
 			PRIMARY KEY (upload_id, n)
 		) WITHOUT ROWID`,
 	},
+	// 5: proxy and group (internal/upstream, the formats). What a proxy knows of a file it fetched (its validator and when it last asked), the names that hosted repositories have published and so claim
+	// in the groups that hold them (docs/spec.md, R3), the names an upstream said it lacks (P4), and the pause after an upstream's errors (P4).
+	5: {
+		`ALTER TABLE assets ADD COLUMN etag TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE assets ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE claims (
+			grp TEXT NOT NULL,
+			name TEXT NOT NULL,
+			PRIMARY KEY (grp, name)
+		) WITHOUT ROWID`,
+		`CREATE TABLE upstream_misses (
+			repo TEXT NOT NULL,
+			name TEXT NOT NULL,
+			until INTEGER NOT NULL,
+			PRIMARY KEY (repo, name)
+		) WITHOUT ROWID`,
+		`CREATE TABLE upstream_state (
+			repo TEXT PRIMARY KEY,
+			fails INTEGER NOT NULL,
+			pause_until INTEGER NOT NULL,
+			last_error TEXT NOT NULL DEFAULT ''
+		) WITHOUT ROWID`,
+	},
 }
 
 // Version is the number of the schema this program writes.

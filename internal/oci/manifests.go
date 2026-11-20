@@ -238,6 +238,7 @@ func (h *OCI) putManifest(w http.ResponseWriter, r *http.Request, q format.Reque
 		in, args := inList(children)
 		stmts = append(stmts, meta.Guard("blob_unknown", `SELECT 1 WHERE (SELECT COUNT(*) FROM oci_manifests WHERE repo = ? AND image = ? AND digest IN `+in+`) = ?`, append([]any{repo, rt.image}, append(args, int64(len(children)))...)...))
 	}
+	stmts = append(stmts, format.ClaimStmts(q.Set, repo, rt.image)...) // a name that is published is claimed in the groups that hold this repository (R3)
 	stmts = append(stmts, meta.S(`INSERT OR IGNORE INTO oci_manifests (repo, image, digest, media_type, size, body, subject, artifact_type, annotations, created_by, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, repo, rt.image, digest, mt, int64(len(body)), stored, subject, art, ann, q.Actor(), h.now()))
 	for _, d := range blobs {

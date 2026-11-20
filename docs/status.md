@@ -4,17 +4,18 @@ Record. What is built, what was run, what is not. Dates are absolute; "not run" 
 
 ## Built, and run
 
-- **The database package** (`internal/meta`): a list of statements applied together or not at all, with guards; the rqlite client; the schema as numbered steps (4 so far); a program refuses a newer schema.
+- **The database package** (`internal/meta`): a list of statements applied together or not at all, with guards; the rqlite client; the schema as numbered steps (5 so far); a program refuses a newer schema.
 - **The blob layer** (`internal/blob`): taking bytes in, holding and letting go, the collector, `reconcile`. Run with a death at each step, with the answer of the database lost at each list, and with races, over a store in memory and over a real blobgate 0.6.1: [blob-layer.md](blob-layer.md), [testing.md](testing.md).
 - **The store over blobgate** (`internal/blobgate`), with `Check`.
 - **The lease** (`internal/lease`): one holder at a time; 12 replicas asking at once for 40 rounds, one wins each time.
 - **The program** (`cmd/godepot`): `serve`, `validate`, `migrate`, `check`, `reconcile`, `version`; the settings with every problem named at once; `/healthz`, `/readyz`, `/metrics`; the image. Two replicas run by hand on 2026-11-17: one led, and the other led 3 seconds after the first was stopped with `SIGTERM`. `serve` with a port that is taken was found to hang, was fixed, and has a test.
 - **Step 3, run 2026-11-19: the format `raw`, accounts, tokens, the settings file, the audit log.** `internal/auth` (accounts, tokens kept as a digest, scope patterns with a fuzz target), `internal/settings` (the file, every problem at once, grants), `internal/audit`, `internal/raw`, `internal/server` (the door and the API), the commands `new-account` and `new-token`, `SIGHUP` reads the file again. Tested against a real rqlite and (`cmd/godepot/raw_test.go`) a real blobgate with a 20 MiB file written and read back by range. Races: 12 writers of one path, in a repository that is immutable (one wins) and in one that overwrites (none leaves an unnamed reference). The secret of a token was searched for in the log and the audit rows after being sent four ways: it is in none (the test was checked to fail when a secret is put in a message). What is in the specification and **not** built for step 3: setting a property after the upload and searching by property across repositories (R6: at upload, and in a listing of a directory, only); promotion (R5); TLS.
 - **Step 4, run 2026-11-20: the format `oci`** (the OCI distribution API 1.1: [oci.md](oci.md), [oci-clients.md](oci-clients.md)). Blobs, uploads in one request and in parts, mounts within a repository, manifests (OCI and Docker schema 2, images and indexes) kept byte for byte, tags (`immutable_tags`), the referrers API, tag lists with paging, deletes that never leave an index without a child, the sweep of old uploads, and for every format the limit on downloads at once with a least speed for the client. Against a real rqlite and a real blobgate: the conformance suite of the specification (v1.1.1) 73 passed, 0 failed, 6 skipped by its own rules; `crane`, `skopeo`, `helm`, `oras` and `cosign` push and pull; a 10 GiB layer in one `PATCH` pushed in 60 s and pulled in 25 s with the program at 17 MiB resident; 20 clients that do not read, against a limit of 8, were turned away or ended. **Not run: `docker`, `podman`.** Not built: deleting a blob, mounts from another repository, `/v2/_catalog`, quotas for OCI.
+- **Step 5, run 2026-11-20: proxy and group repositories for `raw` and `oci`** ([proxy.md](proxy.md), [proxy-howto.md](proxy-howto.md)). `internal/upstream` (the client of an upstream: private addresses refused after resolving, credentials never sent after a redirect, limits, a pause that grows from 5 seconds to 5 minutes, remembered misses, joined fetches), a fetch that streams to the client while it is kept and whose last byte waits for the digest, tags with a time to live and a `HEAD` check, stale answers, changed bytes kept out, groups that stop at the first member, claims (a published name stays claimed), `write_to`. Run with false upstreams (`internal/proxytest`, every guard broken on purpose to see its test fail), and with the program against a real blobgate and rqlite, Docker Hub and a web server (`tools/test/proxy-run.sh`): numbers in [testing.md](testing.md). Two faults of step 4 were found by the flaky tests of that day and fixed (below).
 - **The README try-it**, run as written on 2026-11-19 in containers, with blobgate 0.6.1 (this release's `raw` example). Not run by a test (blobgate's README is; this one is by hand): a test that runs it is still to do.
 - **Documents kept true by a test**: every setting, metric, command, flag and exit code has its line (`cmd/godepot/docs_test.go`; checked to fail when a line is removed).
 
-Statement coverage over `./cmd/godepot` and `./internal/...` with the stand: 87.8 % on 2026-11-17 (`go test -p 1 -coverpkg=./cmd/godepot,./internal/...`).
+Statement coverage over `./cmd/godepot` and `./internal/...` with the stand: 83.7 % on 2026-11-20 (with `-race`, all tests passing; the gate is 80 %), 87.8 % on 2026-11-17 (`go test -p 1 -coverpkg=./cmd/godepot,./internal/...`).
 
 The checks that CI will run, run by hand on 2026-11-17: `gofmt`, `go vet`, staticcheck v0.8.2 with all checks (no findings), gosec v2.29.0 (one finding, an intended read of the file a setting names, annotated), govulncheck v1.9.0 (no vulnerabilities), the build repeated twice for amd64 and for arm64 (the same bytes each time), the image built and run read-only with `--cap-drop ALL`.
 
@@ -24,10 +25,16 @@ A 10 GiB object, 50 to 500 slow readers, 200 000 small objects and `kill -9` of 
 
 ## Not built
 
-- **Every format but `raw` and `oci`**, the proxy, groups, policies, OIDC and LDAP, promotion, the web pages: steps 5 to 12 of the plan. Accounts have no passwords (tokens only) until step 8.
+- **Of step 5:** removing from a proxy's cache and a size limit for it (cleanup is step 7: the cache only grows until then); `merge: true` of a group; the referrers of an upstream; joining fetches across replicas (each replica fetches once); a claim for a name published before step 5 (list its prefix in `claims`); credentials sealed in the database (they are environment variables the file names); an upstream through an HTTP proxy.
+- **Every format but `raw` and `oci`**, policies, OIDC and LDAP, promotion, the web pages: steps 6 to 12 of the plan. Accounts have no passwords (tokens only) until step 8.
 - Parts in the layer itself: the OCI door takes the parts in as blobs and writes the layer once more at the end ([oci.md](oci.md)).
 - TLS on the port of the program.
 - CI has run on GitHub (pull request 3, 2026-11-18: `test`, `analysis`, `reproducible` and `image` passed). The release workflow, the chart, signed releases, the supply-chain gates (Scorecard, dependency review, fuzzing), the security documents, `CONTRIBUTING`, the changelog and the OpenSSF badge are not there.
+
+## Fixed in step 5, found by a flaky test
+
+- An answer of the OCI door that should be empty set `Content-Length: 0` and then wrote an error body (a `416` of a part of an upload): the server cut the connection after it, and a client that reused it got `EOF`. The header is now removed when an error is written.
+- Two ends of one upload at once: the one that came second could read an empty list of parts after the first had committed and answer `400` (the digest of nothing); it answers `404`, as the specification has it, after looking at the upload again. Both showed in `go test` as one run in four on a loaded machine, on `main` too.
 
 ## Not run
 
