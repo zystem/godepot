@@ -104,9 +104,26 @@ type Layout struct {
 	Name func(path string) string
 	// Probe is the path to ask an upstream, to know whether it has the name of the path. nil: the path itself.
 	Probe func(path string) string
+	// AssetPrefix is the prefix of the paths of the files of a name, when they are not at "<name>/" (PyPI: "files/<project>/"). nil: "<name>/".
+	AssetPrefix func(name string) string
+	// Also lists, for a name, paths that show that the repository has it besides the files below it (PyPI: the cached index of a proxy). nil: none.
+	Also func(name string) []string
+	// Source says where a proxied file comes from when it is not at the same path of the upstream, and what the upstream names of it (PyPI: the address in an index, and its hash). nil: the same path.
+	Source func(ctx context.Context, h *Raw, q format.Request, path string) (*Source, error)
 	// TTL is how long a proxied file is trusted: 0 is for ever. nil: the setting ttl of the upstream (none by default).
 	TTL func(path string, u *settings.Upstream) time.Duration
 }
+
+// Source is where a proxied file is fetched from.
+type Source struct {
+	URL    string      // an address the upstream named, or "" for Path on the upstream
+	Path   string      // a path on the upstream (with no leading slash)
+	Header http.Header // sent with the request
+	SHA256 string      // the digest the upstream names, in hex ("" for none)
+}
+
+// ErrNoSource is what Layout.Source returns for a path that the upstream does not have.
+var ErrNoSource = errors.New("the upstream has no such file")
 
 func (h *Raw) self() format.Format {
 	if h.Self != nil {
@@ -585,6 +602,11 @@ func (h *Raw) list(w http.ResponseWriter, r *http.Request, q format.Request) {
 		return
 	}
 	reply(w, http.StatusOK, out)
+}
+
+// Has says whether the repository holds the name of the path (or, for a proxy, can get it): what a group asks of each member.
+func (h *Raw) Has(ctx context.Context, l *settings.Repo, path string) (bool, error) {
+	return h.has(ctx, l, path)
 }
 
 // Lookup says what digest the file at the path has in the repository ("", false: there is no such file). For a format built on raw.

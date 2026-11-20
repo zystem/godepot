@@ -73,9 +73,21 @@ func (h *Raw) has(ctx context.Context, l *settings.Repo, path string) (bool, err
 	} else {
 		// A name that is more than one file (a module, an artifact): the repository has it when it holds a file below it.
 		var rows meta.Rows
-		rows, err = h.DB.Query(ctx, meta.S(`SELECT 1 FROM assets WHERE repo = ? AND substr(path, 1, ?) = ? LIMIT 1`, l.Name, len(name)+1, name+"/"))
+		prefix := name + "/"
+		if h.Layout != nil && h.Layout.AssetPrefix != nil {
+			prefix = h.Layout.AssetPrefix(name)
+		}
+		rows, err = h.DB.Query(ctx, meta.S(`SELECT 1 FROM assets WHERE repo = ? AND substr(path, 1, ?) = ? LIMIT 1`, l.Name, len(prefix), prefix))
 		if len(rows) > 0 {
 			a = &asset{}
+		}
+		if h.Layout != nil && h.Layout.Also != nil {
+			for _, p := range h.Layout.Also(name) {
+				if a != nil || err != nil {
+					break
+				}
+				a, err = h.find(ctx, l.Name, p)
+			}
 		}
 	}
 	if err != nil || a != nil || l.Kind != "proxy" {
@@ -308,7 +320,28 @@ func (h *Raw) fetch(w http.ResponseWriter, r *http.Request, q format.Request, cl
 	if old != nil && old.etag != "" {
 		hd.Set("If-None-Match", old.etag)
 	}
-	resp, err := cl.Do(ctx, http.MethodGet, "/"+escape(path), hd)
+	from := &Source{Path: path}
+	if h.Layout != nil && h.Layout.Source != nil {
+		var err error
+		if from, err = h.Layout.Source(ctx, h, q, path); err != nil {
+			if errors.Is(err, ErrNoSource) {
+				fail(w, http.StatusNotFound, "no such file", nil)
+				return errMissing, false
+			}
+			h.upstreamError(w, r, q, old, err)
+			return err, false
+		}
+	}
+	for k, v := range from.Header {
+		hd[k] = v
+	}
+	var resp *http.Response
+	var err error
+	if from.URL != "" {
+		resp, err = cl.DoURL(ctx, http.MethodGet, from.URL, hd)
+	} else {
+		resp, err = cl.Do(ctx, http.MethodGet, "/"+escape(from.Path), hd)
+	}
 	if err != nil {
 		h.upstreamError(w, r, q, old, err)
 		return err, false
@@ -334,6 +367,9 @@ func (h *Raw) fetch(w http.ResponseWriter, r *http.Request, q format.Request, cl
 		return fmt.Errorf("the upstream answered %d", resp.StatusCode), false
 	}
 	want := strings.ToLower(resp.Header.Get("X-Checksum-Sha256"))
+	if from.SHA256 != "" {
+		want = from.SHA256
+	}
 	if !blob.ValidDigest(want) {
 		want = ""
 	}

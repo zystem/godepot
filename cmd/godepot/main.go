@@ -28,6 +28,7 @@ import (
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/oci"
+	"github.com/zystem/godepot/internal/pypi"
 	"github.com/zystem/godepot/internal/raw"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
@@ -228,9 +229,10 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	rawFormat := &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
 		Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
-		"raw": rawFormat,
-		"go":  gomod.New(rawFormat),
-		"oci": a.oci,
+		"raw":  rawFormat,
+		"go":   gomod.New(rawFormat),
+		"pypi": pypi.New(rawFormat),
+		"oci":  a.oci,
 	}}
 	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte

@@ -75,6 +75,18 @@ group    ok       corp.example.com/internal is not found, and the public proxy w
 
 (The output of 2026-11-20.) The `go` command refuses to send credentials over plain HTTP, so these repositories are read anonymously.
 
+## The format pypi: twine and pip
+
+`tools/test/pypi-run.sh` starts the program with a hosted, a proxy (of pypi.org) and a group repository of the format `pypi`. It installs `twine` into a temporary virtual environment, uploads a wheel through the group, installs it with `pip` from the group, downloads `six` through the proxy twice with no `pip` cache, and asks for a claimed name. It needs the stand and the network.
+
+```
+hosted   ok       twine uploaded a wheel to the group (write_to), pip installed it from the group: "hello from godepot"
+proxy    ok       six==1.16.0 downloaded through the proxy of pypi.org (files.pythonhosted.org is the file host), the hash checked; again with no pip cache: no request upstream (4 in all)
+group    ok       corp-internal is not found, and pypi.org was not asked (claimed prefix)
+```
+
+(The output of 2026-11-20, pip 24.0, Python 3.12.3.)
+
 ## What the variables do
 
 | Variable | Meaning |
