@@ -63,6 +63,18 @@ raw      ok       a file of raw.githubusercontent.com asked twice: one request u
 
 That is the output of 2026-11-20 (the lines are cut where they end in `...`). Read it as: a **5 GiB** layer sent at 100 MiB a second by the upstream reached the client's first byte after **11 ms** and its last after 51 s, with the digest equal, while godepot held **16 MiB**; asked again it came from the store in 11 s with no word to the upstream. **100 clients** asking one cold 512 MiB layer made **one** fetch; every one got the right bytes; 35 were told `503`, `Retry-After: 5` (the limit of 64 downloads at once, [configuration.md](configuration.md)) and did as a client does, and godepot peaked at 33 MiB. **Not run:** the same through two replicas, a slow or failing node of blobgate, `docker` and `podman`.
 
+## The format go: the real go command
+
+`tools/test/go-run.sh` starts the program with a hosted, a proxy (of `proxy.golang.org`) and a group repository of the format `go`, and runs the real `go` command against them: a module zipped and published through the group, built by `go run` from it; `github.com/google/uuid` through the proxy with the real checksum database, and again with an empty module cache; a name under a claimed prefix. It needs the stand and the network.
+
+```
+hosted   ok       a module zipped, published to the group (write_to), built by go run from the group: "hello from godepot"
+proxy    ok       github.com/google/uuid through the proxy of proxy.golang.org with the real checksum database; again with an empty module cache: no request upstream (6 in all)
+group    ok       corp.example.com/internal is not found, and the public proxy was not asked (claimed prefix)
+```
+
+(The output of 2026-11-20.) The `go` command refuses to send credentials over plain HTTP, so these repositories are read anonymously.
+
 ## What the variables do
 
 | Variable | Meaning |

@@ -20,6 +20,7 @@ import (
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/settings"
 	"github.com/zystem/godepot/internal/upstream"
 )
 
@@ -34,6 +35,10 @@ type Raw struct {
 	Downloads *format.Gate
 	Rate      int64
 	Active    *metrics.Gauge
+	// Layout says how a format built on this one names things (nil: the format raw itself).
+	Layout *Layout
+	// Self is the format that serves the requests that this one hands on (a group hands the request to the member that answers): nil is this one. A format built on raw sets it to itself.
+	Self format.Format
 	// Up holds the clients of the upstreams of the proxy repositories (nil: there are none).
 	Up *upstream.Pool
 	// Now is the clock (default time.Now).
@@ -91,6 +96,38 @@ func (h *Raw) count(c *metrics.Counter, label string) {
 	if c != nil {
 		c.Add(label, 1)
 	}
+}
+
+// Layout is what a format built on raw changes in it: which name claims and groups work with, how a proxy asks whether a name exists, and how long a proxied file is trusted.
+type Layout struct {
+	// Name is the name that a path belongs to (a module, an artifact); a group answers for a name from one member and a published name is claimed. nil: the name is the path.
+	Name func(path string) string
+	// Probe is the path to ask an upstream, to know whether it has the name of the path. nil: the path itself.
+	Probe func(path string) string
+	// TTL is how long a proxied file is trusted: 0 is for ever. nil: the setting ttl of the upstream (none by default).
+	TTL func(path string, u *settings.Upstream) time.Duration
+}
+
+func (h *Raw) self() format.Format {
+	if h.Self != nil {
+		return h.Self
+	}
+	return h
+}
+
+// name is the name that claims and groups work with for the path.
+func (h *Raw) name(path string) string {
+	if h.Layout != nil && h.Layout.Name != nil {
+		return h.Layout.Name(path)
+	}
+	return path
+}
+
+func (h *Raw) ttl(u *settings.Upstream, path string) time.Duration {
+	if h.Layout != nil && h.Layout.TTL != nil {
+		return h.Layout.TTL(path, u)
+	}
+	return u.FileTTL()
 }
 
 // Serve answers one request.
@@ -220,6 +257,16 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 		ct = ct[:255]
 	}
 	pj, _ := json.Marshal(props)
+	h.commit(w, ctx, q, path, up, ct, string(pj))
+}
+
+// Commit makes a file of an upload that Ingest has taken in: the same as a PUT after its body has been read, for a format that reads the bytes first (it checks them) and then says which path they
+// are. It answers the client. props is a JSON object ("{}" for none).
+func (h *Raw) Commit(w http.ResponseWriter, ctx context.Context, q format.Request, path string, up *blob.Upload, contentType, props string) {
+	h.commit(w, ctx, q, path, up, contentType, props)
+}
+
+func (h *Raw) commit(w http.ResponseWriter, ctx context.Context, q format.Request, path string, up *blob.Upload, ct, pj string) {
 
 	for try := 0; try < maxTries; try++ {
 		old, err := h.find(ctx, q.Repo.Name, path)
@@ -269,7 +316,7 @@ func (h *Raw) put(w http.ResponseWriter, r *http.Request, q format.Request) {
 		stmts = append(stmts,
 			meta.S(`INSERT INTO assets (id, component_id, repo, path, digest, size, content_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, component, q.Repo.Name, path, up.Digest, up.Size, ct, h.nowUnix()))
 		stmts = append(stmts, h.Blobs.Done(up)...)
-		stmts = append(stmts, format.ClaimStmts(q.Set, q.Repo.Name, path)...) // a name that is published is claimed in the groups that hold this repository (R3)
+		stmts = append(stmts, format.ClaimStmts(q.Set, q.Repo.Name, h.name(path))...) // a name that is published is claimed in the groups that hold this repository (R3)
 		ev := h.event(q, "put", path, audit.OK, fmt.Sprintf("%s %d", up.Digest, up.Size))
 		stmts = append(stmts, h.Audit.Stmt(ev))
 		if _, err := h.DB.Exec(ctx, stmts...); err != nil {
@@ -538,4 +585,13 @@ func (h *Raw) list(w http.ResponseWriter, r *http.Request, q format.Request) {
 		return
 	}
 	reply(w, http.StatusOK, out)
+}
+
+// Lookup says what digest the file at the path has in the repository ("", false: there is no such file). For a format built on raw.
+func (h *Raw) Lookup(ctx context.Context, repo, path string) (digest string, ok bool, err error) {
+	a, err := h.find(ctx, repo, path)
+	if err != nil || a == nil {
+		return "", false, err
+	}
+	return a.digest, true, nil
 }

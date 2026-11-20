@@ -291,10 +291,10 @@ func (b *body) Close() error {
 	return err
 }
 
-// Missing says whether an answer means that the upstream does not give this name: a 404, or a 401 or 403 that the credentials (or the anonymous token) could not turn into an answer. Docker Hub and
+// Missing says whether an answer means that the upstream does not give this name: a 404 (a 410, which the Go proxies use for a version they removed), or a 401 or 403 that the credentials (or the anonymous token) could not turn into an answer. Docker Hub and
 // GitHub's registry answer 401 for a name that is not there, so a refusal for one name is not an error of the upstream and does not pause it.
 func Missing(status int) bool {
-	return status == http.StatusNotFound || status == http.StatusUnauthorized || status == http.StatusForbidden
+	return status == http.StatusNotFound || status == http.StatusGone || status == http.StatusUnauthorized || status == http.StatusForbidden
 }
 
 // Do asks the upstream. path begins with "/" and is added to the address of the upstream; header is added to the request. The answers that the caller must understand come back as they are, whatever

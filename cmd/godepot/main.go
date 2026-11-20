@@ -23,6 +23,7 @@ import (
 	"github.com/zystem/godepot/internal/blob"
 	"github.com/zystem/godepot/internal/blobgate"
 	"github.com/zystem/godepot/internal/format"
+	"github.com/zystem/godepot/internal/gomod"
 	"github.com/zystem/godepot/internal/lease"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
@@ -224,9 +225,11 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	pool := &upstream.Pool{DB: a.db, M: a.m.upstream}
 	a.oci = &oci.OCI{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
 		Downloads: gate, Rate: int64(cfg.MinRate), UploadTTL: cfg.UploadTTL}
+	rawFormat := &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
+		Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
-		"raw": &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
-			Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active},
+		"raw": rawFormat,
+		"go":  gomod.New(rawFormat),
 		"oci": a.oci,
 	}}
 	a.srv.Settings.Store(&settings.Settings{})
