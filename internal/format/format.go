@@ -3,6 +3,7 @@
 package format
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/zystem/godepot/internal/auth"
@@ -24,6 +25,9 @@ type Request struct {
 	Address string
 	// Allowed says the same as Authorize without answering the client, for a format that asks about another path than the one of the request (the source of an OCI mount).
 	Allowed func(action, path string) bool
+	// Login checks the password of an account and gives a token (docs/spec.md, A5): what `npm login` needs. The error is auth.ErrInvalid (a wrong login), a locked or busy answer, or the database's; nil
+	// in a test that has no accounts.
+	Login func(ctx context.Context, account, password, note string) (token string, err error)
 }
 
 // Format answers the requests of the repositories of one format.

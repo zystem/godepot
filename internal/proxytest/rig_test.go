@@ -94,6 +94,7 @@ type rig struct {
 	clean   *cleanup.Engine
 	reads   *format.ReadLog
 	srv     *server.Server
+	auth    *auth.Store
 }
 
 func newRig(t *testing.T, settingsJSON string) *rig {
@@ -139,6 +140,7 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 	s.Cleanup, s.Trash = r.clean, r.trash
 	s.Settings.Store(set)
 	r.srv = s
+	r.auth = as
 	r.ts = httptest.NewServer(s)
 	t.Cleanup(r.ts.Close)
 	ctx := context.Background()

@@ -125,6 +125,19 @@ freed     ok       the trash emptied: 300000 bytes gone from the store (f3); f1 
 
 (The output of 2026-11-21.)
 
+## Passwords: the program, and the real `npm login`
+
+`tools/test/login-run.sh` starts the program with a hosted npm repository and an account with a password set by `godepot set-password` (from the standard input). It checks the password in basic authentication and in `POST /api/v1/login`, runs the real `npm login` **typed at a terminal** (a pseudo-terminal) and publishes with the token it wrote, and locks the account with five wrong passwords. It needs the stand, `npm` and `python3`; it takes seconds.
+
+```
+basic     ok       set-password from stdin; login gave a token; the password works in basic authentication for data (404 = allowed, no such package), a wrong one is 401, and the admin API is not opened by it (403)
+npm       ok       npm login (typed at a terminal) got a token and wrote it to .npmrc; npm publish with it worked
+lock      ok       five wrong passwords: 429 (Retry-After 59 s) for login and basic authentication, also with the right password; the token made before still works
+log       ok       the password is nowhere in the log of the program
+```
+
+(The output of 2026-11-22, npm 9.2.0.)
+
 ## What the variables do
 
 | Variable | Meaning |

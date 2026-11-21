@@ -9,8 +9,10 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
@@ -30,6 +32,10 @@ type Server struct {
 	// Cleanup runs the policies of the repositories and Trash holds what they and people remove (docs/spec.md, C1 to C3); nil: the calls that need them answer 404.
 	Cleanup *cleanup.Engine
 	Trash   *trash.Trash
+	// LoginLife is how long a token that a login makes lives when the login does not say (default 12 hours).
+	LoginLife time.Duration
+
+	fails ipFails
 	// Refused counts the refusals by reason (unauthenticated, forbidden); nil: not counted.
 	Refused *metrics.Counter
 }
@@ -108,9 +114,24 @@ func token(r *http.Request) (tok string, present, ok bool) {
 	return "", true, false
 }
 
+// basicLogin reads the user name and the password of basic authentication.
+func basicLogin(r *http.Request) (user, pass string, ok bool) {
+	h := r.Header.Get("Authorization")
+	scheme, rest, _ := strings.Cut(h, " ")
+	if !strings.EqualFold(scheme, "basic") {
+		return "", "", false
+	}
+	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rest))
+	if err != nil {
+		return "", "", false
+	}
+	user, pass, found := strings.Cut(string(b), ":")
+	return user, pass, found
+}
+
 func unauthorized(w http.ResponseWriter, refuse refuser) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="godepot", charset="UTF-8"`)
-	refuse(w, http.StatusUnauthorized, "a token is needed: send it as the password of basic authentication or as a bearer token")
+	refuse(w, http.StatusUnauthorized, "a token or a password is needed: send a token as a bearer token or as the password of basic authentication, or the password of an account with its name")
 }
 
 // principal finds who the request is from. It answers 401 itself (and audits it) when a token is sent and is not good; the principal is then nil.
@@ -123,7 +144,25 @@ func (s *Server) principal(w http.ResponseWriter, r *http.Request, refuse refuse
 		p   *auth.Principal
 		err error
 	)
-	if ok {
+	if user, pass, isBasic := basicLogin(r); isBasic && user != "" && !strings.HasPrefix(pass, "gd_") {
+		// The password of an account, sent as the password of basic authentication (what `mvn`, `pip` and `docker login` send).
+		p, err = s.password(r, user, pass)
+		var locked *auth.LockedError
+		switch {
+		case errors.As(err, &locked):
+			w.Header().Set("Retry-After", strconv.Itoa(int(max(1, time.Until(locked.Until).Seconds()))))
+			s.count("locked")
+			s.Audit.Record(r.Context(), audit.Event{Actor: user, Remote: remote(r), Action: "login", Result: audit.Refused, Detail: "locked"})
+			refuse(w, http.StatusTooManyRequests, "too many failed logins: try again later")
+			return nil
+		case errors.Is(err, errThrottled) || errors.Is(err, auth.ErrBusy):
+			w.Header().Set("Retry-After", "5")
+			refuse(w, http.StatusTooManyRequests, "too many logins: try again later")
+			return nil
+		case err == nil:
+			return p
+		}
+	} else if ok {
 		p, err = s.Auth.Authenticate(r.Context(), tok)
 	} else {
 		err = errors.New("the Authorization header is not understood")
@@ -175,6 +214,9 @@ func (s *Server) repository(w http.ResponseWriter, r *http.Request) {
 			return s.authorize(w, r.Context(), set, p, rem, repo.Name, path, action, fail)
 		},
 		Allowed: func(action, path string) bool { return set.Allows(p, repo.Name, path, action) },
+		Login: func(ctx context.Context, account, password, note string) (string, error) {
+			return s.loginToken(r, account, password, note)
+		},
 	})
 }
 

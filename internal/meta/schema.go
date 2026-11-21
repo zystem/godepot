@@ -226,6 +226,16 @@ var steps = [][]string{
 			body TEXT NOT NULL
 		) WITHOUT ROWID`,
 	},
+	// 7: passwords of local accounts (docs/spec.md, A1) and the count of failed logins that locks an account for a time. password is "" for an account with none (a robot, or a user who gets in with tokens).
+	7: {
+		`ALTER TABLE accounts ADD COLUMN password TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE accounts ADD COLUMN password_at INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE login_state (
+			account TEXT PRIMARY KEY,
+			fails INTEGER NOT NULL,
+			locked_until INTEGER NOT NULL
+		) WITHOUT ROWID`,
+	},
 }
 
 // Version is the number of the schema this program writes.
