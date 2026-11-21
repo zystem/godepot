@@ -81,13 +81,13 @@ func (t *Tee) Finish() {
 // Through keeps what is read from body as a blob, and sends it to the client as it comes. want is the digest the upstream named ("" if it named none). The upload that comes back is held for the
 // caller to commit, as Ingest says.
 // Each check is made when the bytes are all in, before the last byte is let go; one that fails (an error) abandons the upload, and the last byte is never sent.
-func Through(ctx context.Context, l *blob.Layer, body io.Reader, want string, t *Tee, checks ...func() error) (*blob.Upload, error) {
+func Through(ctx context.Context, l *blob.Layer, body io.Reader, want string, t *Tee, checks ...func(*blob.Upload) error) (*blob.Upload, error) {
 	up, err := l.Ingest(ctx, io.TeeReader(body, t), want)
 	if err != nil {
 		return up, err
 	}
 	for _, c := range checks {
-		if cerr := c(); cerr != nil {
+		if cerr := c(up); cerr != nil {
 			_ = l.Abandon(context.WithoutCancel(ctx), up)
 			return nil, cerr
 		}

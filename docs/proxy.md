@@ -45,7 +45,9 @@ A **proxy** repository copies, on demand, from one upstream. It is **read-only**
 
 ### What is written
 
-A fetch writes the cached thing in one transaction with its references (so the collector never frees what the cache names) and one line of the audit log: action `fetch`, actor `proxy`, the repository, the path (`<image>/manifests/<digest>`, `<image>/blobs/<digest>`, or the raw path) and the digest. A proxied raw file is a component made by `proxy`. The cached blobs are the same blobs of the store as everything else: bytes that a proxy and a hosted repository both have are kept once. **Not built yet:** removing from a proxy's cache (cleanup comes with the policies of step 7: until then the cache only grows), and a size limit of a cache.
+A fetch writes the cached thing in one transaction with its references (so the collector never frees what the cache names) and one line of the audit log: action `fetch`, actor `proxy`, the repository, the path (`<image>/manifests/<digest>`, `<image>/blobs/<digest>`, or the raw path) and the digest. A proxied raw file is a component made by `proxy`. The cached blobs are the same blobs of the store as everything else: bytes that a proxy and a hosted repository both have are kept once. When bytes are refused because their digest is on the block list ([policy.md](policy.md)) the line is `blocked` (result `refused`). **Not built yet:** removing from a proxy's cache (cleanup comes with the policies of step 7: until then the cache only grows), and a size limit of a cache.
+
+**Cooldown and block lists (P6, P7).** A proxy of the formats `npm`, `pypi` and `go` can hold back the versions that the upstream published lately, and any proxy but `oci` can refuse versions and digests by name: [policy.md](policy.md).
 
 ## A group
 

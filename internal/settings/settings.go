@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zystem/godepot/internal/auth"
+	"github.com/zystem/godepot/internal/policy"
 )
 
 // Formats that exist. A format is added here when its door is built.
@@ -111,6 +112,20 @@ type Upstream struct {
 	NegativeTTL *Duration `json:"negative_ttl,omitempty"`
 	// ImmutablePaths are the patterns of the raw files that cannot change upstream: other bytes under such a path are kept out, and are an alarm (P5). Only for the format raw.
 	ImmutablePaths []string `json:"immutable_paths,omitempty"`
+	// Cooldown holds back a version that the upstream published less than this long ago (docs/spec.md, P6): it is left out of the indexes this repository serves and is refused by name. Default none. For
+	// the formats npm, pypi and go. Allow lifts it for the versions it names; Block names versions and digests that are never served (P7), for every format but oci.
+	Cooldown *Duration `json:"cooldown,omitempty"`
+	Allow    []string  `json:"allow,omitempty"`
+	Block    []string  `json:"block,omitempty"`
+}
+
+// Policy is the cooldown and the lists of the upstream.
+func (u *Upstream) Policy() *policy.Policy {
+	var c time.Duration
+	if u.Cooldown != nil {
+		c = time.Duration(*u.Cooldown)
+	}
+	return policy.New(c, u.Allow, u.Block)
 }
 
 // Default values of an upstream.
@@ -348,6 +363,25 @@ func (s *Settings) checkProxy(who string, r *Repo, add func(string, ...any)) {
 	}
 	if u.MaxPerSecond < 0 || u.MaxConcurrent < 0 {
 		add("%s: upstream.max_per_second and max_concurrent are not negative", who)
+	}
+	if u.Cooldown != nil && r.Format != "npm" && r.Format != "pypi" && r.Format != "go" {
+		add("%s: upstream.cooldown is for the formats npm, pypi and go (the others give no time of publication that can be trusted)", who)
+	}
+	if (u.Cooldown != nil || len(u.Allow) > 0 || len(u.Block) > 0) && r.Format == "oci" {
+		add("%s: upstream.cooldown, allow and block are not built for the format oci yet", who)
+	}
+	for _, l := range []struct {
+		name string
+		v    []string
+	}{{"allow", u.Allow}, {"block", u.Block}} {
+		for _, e := range l.v {
+			if _, err := policy.ParseRule(e); err != nil {
+				add("%s: upstream.%s: %v", who, l.name, err)
+			}
+		}
+	}
+	if len(u.Allow) > 0 && u.Cooldown == nil {
+		add("%s: upstream.allow lifts the cooldown and there is none: set upstream.cooldown, or remove allow", who)
 	}
 	if len(u.ImmutablePaths) > 0 && r.Format != "raw" {
 		add("%s: upstream.immutable_paths is for the format raw", who)

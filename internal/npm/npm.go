@@ -125,7 +125,9 @@ func (p *NPM) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 		case kPackument, kTags:
 			p.proxyDoc(w, r, q, t)
 		case kTarball:
-			p.Raw.Serve(w, r, q)
+			if p.tarballAllowed(w, r, q, t) {
+				p.Raw.Serve(w, r, q)
+			}
 		default:
 			fail(w, http.StatusNotFound, "not an address of a proxy repository")
 		}

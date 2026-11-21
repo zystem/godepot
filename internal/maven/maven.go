@@ -92,6 +92,9 @@ func (m *Maven) Serve(w http.ResponseWriter, r *http.Request, q format.Request) 
 			fail(w, http.StatusMethodNotAllowed, "a proxy repository is read-only: deploy to a hosted repository, or to a group that has write_to")
 			return
 		}
+		if m.policed(w, r, q, t) {
+			return
+		}
 		if t.kind == kSum && (t.inner.kind == kMeta || t.inner.kind == kSnapMeta) {
 			m.proxySum(w, r, q, t)
 			return
@@ -206,6 +209,7 @@ func write(w http.ResponseWriter, r *http.Request, body []byte, ct string) {
 	s := sha256.Sum256(body)
 	etag := `"` + hex.EncodeToString(s[:16]) + `"`
 	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", etag)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
@@ -215,7 +219,7 @@ func write(w http.ResponseWriter, r *http.Request, body []byte, ct string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_, _ = w.Write(body)
+	_, _ = w.Write(body) // #nosec G705 -- the type is XML or plain text and nosniff is set: a browser does not run it
 }
 
 func stamp(unix int64) string { return time.Unix(unix, 0).UTC().Format("20060102150405") }

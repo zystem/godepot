@@ -24,6 +24,9 @@ import (
 // errMissing is what the leader of a fetch tells the ones that wait: the upstream has no such file.
 var errMissing = errors.New("the upstream has no such file")
 
+// errBlockedDigest is what a fetch ends with when the bytes are on the block list.
+var errBlockedDigest = errors.New("the bytes are on the block list of this repository (by their digest)")
+
 // group answers a request sent to a group: a write goes to write_to, a read to the member that has the name (docs/spec.md, R1, R2, R3, T20). The answer is the member's; the audit names the member.
 func (h *Raw) group(w http.ResponseWriter, r *http.Request, q format.Request) {
 	switch r.Method {
@@ -205,6 +208,17 @@ func (h *Raw) proxyGet(w http.ResponseWriter, r *http.Request, q format.Request)
 	if err != nil {
 		h.unavailable(w, err)
 		return
+	}
+	if pol := q.Repo.Upstream.Policy(); old != nil && pol.BlockedDigest("sha256:"+old.digest) {
+		fail(w, http.StatusForbidden, "this file is on the block list of this repository (by its digest)", nil)
+		return
+	}
+	if h.Layout == nil {
+		// The format raw itself: the name is the path, and a path pattern on the block list refuses it.
+		if v, blocked := q.Repo.Upstream.Policy().Blocked(path, ""); blocked {
+			fail(w, http.StatusForbidden, v.Why, nil)
+			return
+		}
 	}
 	ttl := h.ttl(q.Repo.Upstream, path)
 	if old != nil && (ttl == 0 || h.nowUnix()-old.checked < int64(ttl/time.Second)) {
@@ -425,18 +439,35 @@ func (h *Raw) fetch(w http.ResponseWriter, r *http.Request, q format.Request, cl
 	}
 	tee := format.NewTee(w, h.Rate, func() { w.WriteHeader(http.StatusOK) })
 	var body io.Reader = src
-	var checks []func() error
+	var checks []func(*blob.Upload) error
 	if from.Also != nil {
 		hs := from.Also.New()
 		body = io.TeeReader(src, hs)
-		checks = append(checks, func() error {
+		checks = append(checks, func(*blob.Upload) error {
 			if !bytes.Equal(hs.Sum(nil), from.Also.Sum) {
 				return blob.ErrDigest
 			}
 			return nil
 		})
 	}
+	if pol := q.Repo.Upstream.Policy(); pol != nil && len(pol.Block) > 0 {
+		// A digest on the block list is never kept (P7): the bytes are known only when they are in, so the check is the last, before the last byte is let go.
+		checks = append(checks, func(up *blob.Upload) error {
+			if pol.BlockedDigest("sha256:" + up.Digest) {
+				return errBlockedDigest
+			}
+			return nil
+		})
+	}
 	up, err := format.Through(ctx, h.Blobs, body, want, tee, checks...)
+	if errors.Is(err, errBlockedDigest) {
+		h.Audit.Record(ctx, h.event(q, "blocked", path, audit.Refused, "the bytes are on the block list by their digest"))
+		if !tee.Started() {
+			hdr.Del("Content-Length")
+			fail(w, http.StatusForbidden, errBlockedDigest.Error(), nil)
+			return err, false
+		}
+	}
 	if err != nil {
 		h.fetchFailed(ctx, cl, src, err)
 		if errors.Is(err, blob.ErrDigest) {

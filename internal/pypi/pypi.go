@@ -95,7 +95,9 @@ func (p *PyPI) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 		case kIndex:
 			p.proxyIndex(w, r, q, t)
 		case kFile:
-			p.Raw.Serve(w, r, q)
+			if p.fileAllowed(w, r, q, t) {
+				p.Raw.Serve(w, r, q)
+			}
 		default:
 			reply(w, http.StatusNotFound, "a proxy repository has no list of projects: ask for simple/<project>/")
 		}

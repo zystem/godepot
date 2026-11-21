@@ -100,3 +100,5 @@ func (m *Maven) source(ctx context.Context, h *raw.Raw, q format.Request, path s
 	}
 	return nil, raw.ErrNoSource
 }
+
+func hexOf(b []byte) string { return hex.EncodeToString(b) }
