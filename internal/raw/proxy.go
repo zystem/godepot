@@ -1,9 +1,11 @@
 package raw
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -422,7 +424,19 @@ func (h *Raw) fetch(w http.ResponseWriter, r *http.Request, q format.Request, cl
 		hdr.Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 	}
 	tee := format.NewTee(w, h.Rate, func() { w.WriteHeader(http.StatusOK) })
-	up, err := format.Through(ctx, h.Blobs, src, want, tee)
+	var body io.Reader = src
+	var checks []func() error
+	if from.Also != nil {
+		hs := from.Also.New()
+		body = io.TeeReader(src, hs)
+		checks = append(checks, func() error {
+			if !bytes.Equal(hs.Sum(nil), from.Also.Sum) {
+				return blob.ErrDigest
+			}
+			return nil
+		})
+	}
+	up, err := format.Through(ctx, h.Blobs, body, want, tee, checks...)
 	if err != nil {
 		h.fetchFailed(ctx, cl, src, err)
 		if errors.Is(err, blob.ErrDigest) {

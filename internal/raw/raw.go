@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -120,6 +121,14 @@ type Source struct {
 	Path   string      // a path on the upstream (with no leading slash)
 	Header http.Header // sent with the request
 	SHA256 string      // the digest the upstream names, in hex ("" for none)
+	// Also is a hash of another kind that the upstream names (npm names a sha512 and a sha1): the bytes are checked against it before the last byte is let go, as against SHA256. nil: none.
+	Also *Hash
+}
+
+// Hash is a digest of a kind that the store does not use, to be checked of what a proxy fetches.
+type Hash struct {
+	New func() hash.Hash
+	Sum []byte
 }
 
 // ErrNoSource is what Layout.Source returns for a path that the upstream does not have.
