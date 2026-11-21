@@ -25,6 +25,7 @@ import (
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/gomod"
 	"github.com/zystem/godepot/internal/lease"
+	"github.com/zystem/godepot/internal/maven"
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/npm"
@@ -230,11 +231,12 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	rawFormat := &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
 		Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
-		"raw":  rawFormat,
-		"go":   gomod.New(rawFormat),
-		"pypi": pypi.New(rawFormat),
-		"npm":  npm.New(rawFormat),
-		"oci":  a.oci,
+		"raw":   rawFormat,
+		"go":    gomod.New(rawFormat),
+		"pypi":  pypi.New(rawFormat),
+		"npm":   npm.New(rawFormat),
+		"maven": maven.New(rawFormat),
+		"oci":   a.oci,
 	}}
 	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte

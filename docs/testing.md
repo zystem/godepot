@@ -100,6 +100,18 @@ group     ok       corp-internal and @corp/ui are not found, and registry.npmjs.
 
 (The output of 2026-11-20, npm 9.2.0, node v18.19.1.)
 
+## The format maven: mvn itself
+
+`tools/test/maven-run.sh` starts the program with a hosted, a proxy (of Maven Central) and a group repository of the format `maven`, and runs the real `mvn` with the group as the mirror of everything: it deploys a jar as a release and as a snapshot (twice), deploys the release again, resolves both from the group with an empty local repository; it resolves `commons-io` 2.11.0 (and the plugin that does it) through the proxy twice, the second time with an empty local repository, and asks for a claimed name. It needs the stand, `mvn` and a JDK, and the network; it takes about four minutes.
+
+```
+hosted    ok       mvn deploy:deploy-file sent 1.0 and 2.0-SNAPSHOT (twice) to the group; 1.0 again was refused; mvn dependency:get took both back; the metadata names release 1.0 and snapshot build 2
+proxy     ok       the plugin and commons-io 2.11.0 came through the proxy of Maven Central, each file checked against its checksum file; again with an empty local repository: no request upstream (1533 in all)
+group     ok       com.acme:internal is not found, and Maven Central was not asked (claimed prefix com/acme/)
+```
+
+(The output of 2026-11-21, Maven 3.8.7, JDK 21.)
+
 ## What the variables do
 
 | Variable | Meaning |
