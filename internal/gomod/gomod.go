@@ -41,6 +41,12 @@ func New(base *raw.Raw) *Go {
 	g := &Go{Raw: &r}
 	r.Self = g
 	r.Layout = &raw.Layout{
+		Unit: func(path string) (string, string, bool) {
+			if t, ok := parse(path); ok && t.kind != kList && t.kind != kLatest {
+				return t.module, t.version, true
+			}
+			return "", "", false
+		},
 		Name: func(path string) string {
 			if t, ok := parse(path); ok {
 				return t.module

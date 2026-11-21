@@ -52,6 +52,14 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, s.Settings.Load())
 	case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "forget" && r.Method == http.MethodPost:
 		s.forget(w, r, p, parts[1])
+	case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "cleanup" && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		s.cleanup(w, r, p, parts[1])
+	case len(parts) == 1 && parts[0] == "trash" && r.Method == http.MethodGet:
+		s.trashList(w, r, p)
+	case len(parts) == 3 && parts[0] == "trash" && parts[2] == "restore" && r.Method == http.MethodPost:
+		s.trashRestore(w, r, p, parts[1])
+	case len(parts) == 2 && parts[0] == "trash" && r.Method == http.MethodDelete:
+		s.trashPurge(w, r, p, parts[1])
 	default:
 		fail(w, http.StatusNotFound, "no such call")
 	}

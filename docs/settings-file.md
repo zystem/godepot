@@ -34,6 +34,13 @@ Accounts and tokens are **not** in the file: they are made while the program run
 | `overwrite_paths` | none | For the format `raw` only (refused for `go`, `pypi`, `npm` and `maven`: a published version or file is never overwritten): patterns of the paths that may be written again with other bytes. With none, a path once written is immutable: other bytes are `409` ([raw.md](raw.md)). |
 | `quota_bytes` | `0` (no limit) | For the format `raw` only (the file is refused when an `oci` repository sets one). The most bytes the files of the repository may add up to (each file counted once however many repositories hold the same bytes). A write over it is `413` with the figures. |
 | `quota_components` | `0` (no limit) | For `raw` only, as `quota_bytes`. The most files (for `raw`, a file is a component) the repository may hold. |
+| `cleanup` | none | A policy that removes what is old, for a hosted or a proxy repository of a format other than `oci` ([cleanup.md](cleanup.md)). An object with the words below. It runs every `GODEPOT_CLEANUP_SECONDS` and writes a report; it removes only with `enforce`. |
+| `enforce` (in `cleanup`) | `false` | Remove what the report names (to the trash). **With `false` the policy only reports.** A policy that has `enforce` and no `remove_older_days` is refused. |
+| `remove_older_days` (in `cleanup`) | not set: nothing is removed | Remove the versions whose newest file was written more than this many days ago and that no keep rule holds. `0` is every version that is not kept. |
+| `keep_newest` (in `cleanup`) | `0` (this rule keeps none) | Keep the newest N versions of each name, by when they were written. For the format `raw` every file is a name of its own, so any N of 1 or more keeps all. |
+| `keep_read_days` (in `cleanup`) | `0` (this rule keeps none) | Keep what was read in the last D days. The time of a read is kept to the day. |
+| `keep` (in `cleanup`) | none | Patterns of names that are kept (`org/keep/**`; for `raw`, the paths). |
+| `keep_props` (in `cleanup`) | none | Keep what has all of these properties: an object of key and value (`{"pin": "yes"}`). |
 
 ### `upstream` (of a proxy)
 

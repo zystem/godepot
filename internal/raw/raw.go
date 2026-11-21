@@ -22,6 +22,7 @@ import (
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/settings"
+	"github.com/zystem/godepot/internal/trash"
 	"github.com/zystem/godepot/internal/upstream"
 )
 
@@ -42,6 +43,9 @@ type Raw struct {
 	Self format.Format
 	// Up holds the clients of the upstreams of the proxy repositories (nil: there are none).
 	Up *upstream.Pool
+	// LastRead notes the components that are read (C4); nil: not kept. Trash is where a delete goes (C3); nil: a delete frees at once.
+	LastRead *format.ReadLog
+	Trash    *trash.Trash
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 }
@@ -113,6 +117,17 @@ type Layout struct {
 	Source func(ctx context.Context, h *Raw, q format.Request, path string) (*Source, error)
 	// TTL is how long a proxied file is trusted: 0 is for ever. nil: the setting ttl of the upstream (none by default).
 	TTL func(path string, u *settings.Upstream) time.Duration
+	// Unit says which version a file belongs to, for the cleanup (docs/spec.md, C1): the files of a name and a version are removed together. ok is false for a file that is not part of a version (a list of
+	// versions, a cached index): a policy never removes it. nil: every file is a version of its own, named by its path.
+	Unit func(path string) (name, version string, ok bool)
+}
+
+// Unit is the name and the version that the cleanup counts the file at the path in.
+func (h *Raw) Unit(path string) (string, string, bool) {
+	if h.Layout != nil && h.Layout.Unit != nil {
+		return h.Layout.Unit(path)
+	}
+	return path, "", true
 }
 
 // Source is where a proxied file is fetched from.
@@ -457,6 +472,7 @@ func (h *Raw) get(w http.ResponseWriter, r *http.Request, q format.Request) {
 		fail(w, http.StatusRequestedRangeNotSatisfiable, "the range cannot be satisfied", nil)
 		return
 	}
+	h.LastRead.Add(a.component)
 	length := to - from + 1
 	if a.size == 0 {
 		length = 0
@@ -521,14 +537,22 @@ func (h *Raw) delete(w http.ResponseWriter, r *http.Request, q format.Request) {
 			fail(w, http.StatusNotFound, "no such file", nil)
 			return
 		}
-		ev := h.event(q, "delete", path, audit.OK, a.digest)
-		stmts := []meta.Stmt{meta.Guard("changed", `SELECT 1 FROM assets WHERE id = ?`, a.id)}
-		stmts = append(stmts, h.Blobs.Drop("asset:"+a.id)...)
-		stmts = append(stmts,
-			meta.S(`DELETE FROM assets WHERE id = ?`, a.id),
-			meta.S(`DELETE FROM components WHERE id = ?`, a.component),
-			h.Audit.Stmt(ev))
-		if _, err := h.DB.Exec(ctx, stmts...); err != nil {
+		if h.Trash != nil && h.Trash.Days > 0 {
+			// To the trash, where it can be put back for a time (C3); the item is called by its path.
+			_, err = h.Trash.Move(ctx, q.Repo.Name, []string{a.id}, path, "", q.Actor(), "delete")
+		} else {
+			ev := h.event(q, "delete", path, audit.OK, a.digest)
+			stmts := []meta.Stmt{meta.Guard("changed", `SELECT 1 FROM assets WHERE id = ?`, a.id)}
+			stmts = append(stmts, h.Blobs.Drop("asset:"+a.id)...)
+			stmts = append(stmts,
+				meta.S(`DELETE FROM assets WHERE id = ?`, a.id),
+				meta.S(`DELETE FROM components WHERE id = ?`, a.component),
+				h.Audit.Stmt(ev))
+			if _, err = h.DB.Exec(ctx, stmts...); err == nil {
+				h.Audit.Emit(ev)
+			}
+		}
+		if err != nil {
 			if why, refused := meta.RefusedBy(err); refused && why == "changed" {
 				format.Pause(ctx, try)
 				continue
@@ -536,7 +560,6 @@ func (h *Raw) delete(w http.ResponseWriter, r *http.Request, q format.Request) {
 			h.unavailable(w, err)
 			return
 		}
-		h.Audit.Emit(ev)
 		h.count(h.Deletes, q.Repo.Name)
 		w.WriteHeader(http.StatusNoContent)
 		return
