@@ -116,3 +116,31 @@ func TestOCISettings(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupSettings(t *testing.T) {
+	ok := `{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"enforce": true, "remove_older_days": 30, "keep_newest": 3, "keep_read_days": 7, "keep": ["org/keep/**"], "keep_props": {"pin": "yes"}}},
+		{"name": "p", "format": "npm", "kind": "proxy", "upstream": {"url": "https://registry.npmjs.org"}, "cleanup": {"remove_older_days": 0}}]}`
+	s, err := settings.Parse(strings.NewReader(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Repo("m").Cleanup; c == nil || !c.Enforce || *c.RemoveOlderDays != 30 || c.KeepNewest != 3 || c.KeepProps["pin"] != "yes" {
+		t.Fatalf("%+v", c)
+	}
+	if c := s.Repo("p").Cleanup; c == nil || c.RemoveOlderDays == nil || *c.RemoveOlderDays != 0 {
+		t.Fatal("remove_older_days 0 is a value, not none")
+	}
+	for text, word := range map[string]string{
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"enforce": true}}]}`:                                                                             "nothing would ever be removed",
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"remove_older_days": -1}}]}`:                                                                     "negative",
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"keep_newest": -1}}]}`:                                                                           "negative",
+		`{"repositories": [{"name": "o", "format": "oci", "kind": "hosted", "cleanup": {"remove_older_days": 1}}]}`:                                                                        "not built for the format oci",
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted"}, {"name": "g", "format": "maven", "kind": "group", "members": ["m"], "cleanup": {"remove_older_days": 1}}]}`: "not a group",
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"remove_older_days": 1, "keep": ["*a*a*a*a*a*"]}}]}`:                                             "keep",
+		`{"repositories": [{"name": "m", "format": "maven", "kind": "hosted", "cleanup": {"colour": 1}}]}`:                                                                                 "colour",
+	} {
+		if _, err := settings.Parse(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), word) {
+			t.Errorf("%s: %v, want a problem with %q", text, err, word)
+		}
+	}
+}

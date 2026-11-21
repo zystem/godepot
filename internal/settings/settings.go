@@ -45,6 +45,25 @@ type Repo struct {
 	// QuotaBytes and QuotaComponents are the limits of the repository (R7); 0 is no limit.
 	QuotaBytes      int64 `json:"quota_bytes,omitempty"`
 	QuotaComponents int64 `json:"quota_components,omitempty"`
+	// Cleanup is the policy that removes what is old (docs/spec.md, C1, C2): a report every time it runs, and no removal until Enforce is true. Not for a group.
+	Cleanup *Cleanup `json:"cleanup,omitempty"`
+}
+
+// Cleanup is the cleanup policy of a repository. A version (a module version, a file of a version, a package version; for the format raw, a file) is removed when RemoveOlderDays is set and it is older and
+// none of the keep rules holds. A keep rule always wins (C1).
+type Cleanup struct {
+	// Enforce makes the policy remove what its report names. Default false: the policy only writes the report (C2).
+	Enforce bool `json:"enforce,omitempty"`
+	// RemoveOlderDays removes the versions written more than this many days ago. 0 means every version that is not kept. Default: not set, and then nothing is removed.
+	RemoveOlderDays *int `json:"remove_older_days,omitempty"`
+	// KeepNewest keeps the newest N versions of each name (by when they were written). Default 0: none kept by this rule.
+	KeepNewest int `json:"keep_newest,omitempty"`
+	// KeepReadDays keeps what was read in the last D days. Default 0: none kept by this rule.
+	KeepReadDays int `json:"keep_read_days,omitempty"`
+	// Keep are patterns of the names (for the format raw, the paths) that are kept. Default none.
+	Keep []string `json:"keep,omitempty"`
+	// KeepProps keeps what has all of these properties (key and value). Default none.
+	KeepProps map[string]string `json:"keep_props,omitempty"`
 }
 
 // Duration is a length of time written in the file as a string of Go ("90s", "5m", "24h"); "0" is none.
@@ -254,6 +273,25 @@ func (s *Settings) Check() error {
 		}
 		if r.QuotaBytes < 0 || r.QuotaComponents < 0 {
 			add("%s: a quota is negative", who)
+		}
+		if c := r.Cleanup; c != nil {
+			switch {
+			case r.Kind == "group":
+				add("%s: cleanup is for a hosted or a proxy repository, not a group (clean the members)", who)
+			case r.Format == "oci":
+				add("%s: cleanup is not built for the format oci yet", who)
+			}
+			if (c.RemoveOlderDays != nil && *c.RemoveOlderDays < 0) || c.KeepNewest < 0 || c.KeepReadDays < 0 {
+				add("%s: cleanup: a number of days or versions is negative", who)
+			}
+			if c.Enforce && c.RemoveOlderDays == nil {
+				add("%s: cleanup: enforce is true and no remove_older_days is set: nothing would ever be removed", who)
+			}
+			for _, p := range c.Keep {
+				if err := auth.CheckPattern(p); err != nil {
+					add("%s: cleanup keep: %v", who, err)
+				}
+			}
 		}
 		for _, p := range r.OverwritePaths {
 			if err := auth.CheckPattern(p); err != nil {

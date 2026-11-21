@@ -36,6 +36,19 @@ func New(base *raw.Raw) *NPM {
 	p := &NPM{Raw: &r}
 	r.Self = p
 	r.Layout = &raw.Layout{
+		Unit: func(path string) (string, string, bool) {
+			t, ok := parse(path)
+			switch {
+			case !ok:
+			case t.kind == kManifest:
+				return t.pkg, strings.TrimSuffix(t.file, ".json"), true
+			case t.kind == kTarball:
+				if v, ok := version(t.pkg, t.file); ok {
+					return t.pkg, v, true
+				}
+			}
+			return "", "", false
+		},
 		Name:        nameOf,
 		AssetPrefix: func(name string) string { return name + "/-/" },
 		Also:        func(name string) []string { return []string{"-/index/" + name + ".json"} },
