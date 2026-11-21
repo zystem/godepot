@@ -32,6 +32,12 @@ func New(base *raw.Raw) *Maven {
 	m := &Maven{Raw: &r}
 	r.Self = m
 	r.Layout = &raw.Layout{
+		Unit: func(path string) (string, string, bool) {
+			if t := parse(path); t.kind == kFile {
+				return t.name, t.version, true
+			}
+			return "", "", false
+		},
 		Name: nameOf,
 		// A repository has an artifact when it has a file below its directory; a proxy is asked for its maven-metadata.xml.
 		Probe: func(path string) string {

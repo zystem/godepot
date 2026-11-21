@@ -31,6 +31,9 @@ type Config struct {
 	// MaxDownloads is how many blobs may be sent at once (docs/spec.md, P11); MinRate is the least speed of a client in bytes a second, 0 for none.
 	MaxDownloads int
 	MinRate      int
+	// TrashDays is how long what is removed stays in the trash (docs/spec.md, C3); 0 frees at once. CleanupEvery is how often the policies run.
+	TrashDays    int
+	CleanupEvery time.Duration
 }
 
 // getenv reads NAME, or the contents of the file that NAME_FILE names (a secret kept out of the environment of the process). Both set is an error.
@@ -112,6 +115,8 @@ func loadConfig(env func(string) string) (*Config, error) {
 	c.TokenMaxLife = time.Duration(num("GODEPOT_TOKEN_MAX_DAYS", 90, 1)) * 24 * time.Hour
 	c.MaxDownloads = num("GODEPOT_MAX_DOWNLOADS", 64, 1)
 	c.MinRate = num("GODEPOT_MIN_DOWNLOAD_RATE", 8192, 0)
+	c.TrashDays = num("GODEPOT_TRASH_DAYS", 7, 0)
+	c.CleanupEvery = secs("GODEPOT_CLEANUP_SECONDS", 3600, 60)
 	if c.LeaseTTL > 0 && c.CollectEvery > 0 && c.LeaseTTL < 2*c.CollectEvery {
 		add(fmt.Errorf("GODEPOT_LEASE_SECONDS (%d) is less than twice GODEPOT_COLLECT_SECONDS (%d): the lease would run out between two renewals", c.LeaseTTL/time.Second, c.CollectEvery/time.Second))
 	}

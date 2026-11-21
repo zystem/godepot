@@ -20,6 +20,7 @@ import (
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/blob"
+	"github.com/zystem/godepot/internal/cleanup"
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/gomod"
 	"github.com/zystem/godepot/internal/maven"
@@ -32,6 +33,7 @@ import (
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
 	"github.com/zystem/godepot/internal/testutil"
+	"github.com/zystem/godepot/internal/trash"
 	"github.com/zystem/godepot/internal/upstream"
 )
 
@@ -88,6 +90,10 @@ type rig struct {
 	reqs    *metrics.Counter
 	errs    *metrics.Counter
 	gate    *format.Gate
+	trash   *trash.Trash
+	clean   *cleanup.Engine
+	reads   *format.ReadLog
+	srv     *server.Server
 }
 
 func newRig(t *testing.T, settingsJSON string) *rig {
@@ -99,7 +105,7 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 	store := testutil.NewMemStore()
 	layer := &blob.Layer{DB: db, Store: store, Now: now, Grace: time.Hour, UploadTTL: time.Hour}
 	al := &audit.Log{DB: db, Now: now}
-	as := &auth.Store{DB: db, Now: now, MaxLife: 200 * time.Hour}
+	as := &auth.Store{DB: db, Now: now, MaxLife: 10000 * time.Hour}
 	set, err := settings.Parse(strings.NewReader(settingsJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +119,9 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 		gate:    format.NewGate(64, time.Second),
 	}
 	r.pool = &upstream.Pool{DB: db, Now: now, M: &upstream.Metrics{Requests: r.reqs, Errors: r.errs, Stale: r.stale, Changed: r.changed}}
-	rawFormat := &raw.Raw{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate}
+	r.trash = &trash.Trash{DB: db, Blobs: layer, Audit: al, Now: now} // Days 0: a delete frees at once; a test of the trash sets Days
+	r.reads = &format.ReadLog{Now: now}
+	rawFormat := &raw.Raw{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate, LastRead: r.reads, Trash: r.trash}
 	s := &server.Server{Auth: as, Audit: al, Formats: map[string]format.Format{
 		"raw":   rawFormat,
 		"go":    gomod.New(rawFormat),
@@ -122,7 +130,15 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 		"maven": maven.New(rawFormat),
 		"oci":   &oci.OCI{Up: r.pool, Blobs: layer, DB: db, Audit: al, Now: now, Downloads: r.gate, MaxManifest: 1 << 20},
 	}}
+	r.clean = &cleanup.Engine{DB: db, Trash: r.trash, Audit: al, Now: now, Units: map[string]cleanup.Unitor{}}
+	for name, f := range s.Formats {
+		if u, ok := f.(cleanup.Unitor); ok {
+			r.clean.Units[name] = u
+		}
+	}
+	s.Cleanup, s.Trash = r.clean, r.trash
 	s.Settings.Store(set)
+	r.srv = s
 	r.ts = httptest.NewServer(s)
 	t.Cleanup(r.ts.Close)
 	ctx := context.Background()
@@ -130,7 +146,7 @@ func newRig(t *testing.T, settingsJSON string) *rig {
 		t.Fatal(err)
 	}
 	all := auth.Grant{Repositories: []string{"*"}, Actions: []string{auth.Read, auth.Write, auth.Delete, auth.Promote, auth.Admin}}
-	r.admin, _, err = as.CreateToken(ctx, "root", []auth.Grant{all}, 100*time.Hour, "")
+	r.admin, _, err = as.CreateToken(ctx, "root", []auth.Grant{all}, 9000*time.Hour, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,3 +231,11 @@ func blobBytes(n int, seed byte) []byte {
 }
 
 var _ = bytes.NewReader
+
+// parseSettings reads a settings file text.
+func parseSettings(text string) (*settings.Settings, error) {
+	return settings.Parse(strings.NewReader(text))
+}
+
+// setSettings replaces the settings the server answers under (what a SIGHUP does).
+func (r *rig) setSettings(s *settings.Settings) { r.srv.Settings.Store(s) }

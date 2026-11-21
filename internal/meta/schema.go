@@ -201,6 +201,31 @@ var steps = [][]string{
 			last_error TEXT NOT NULL DEFAULT ''
 		) WITHOUT ROWID`,
 	},
+	// 6: cleanup and the trash (internal/trash, internal/cleanup; docs/spec.md, C1 to C4). last_read is the day (days since 1970) a component was last read, kept to the day and written in batches (C4).
+	// A removed thing is moved to the trash, whole: payload holds its rows as JSON, and the owner 'trash:<id>' holds its blobs, so nothing is freed until the trash is emptied. A report is the last
+	// that a policy made for a repository.
+	6: {
+		`ALTER TABLE components ADD COLUMN last_read INTEGER NOT NULL DEFAULT 0`,
+		`CREATE TABLE trash (
+			id TEXT PRIMARY KEY,
+			repo TEXT NOT NULL,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			deleted_at INTEGER NOT NULL,
+			deleted_by TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			bytes INTEGER NOT NULL,
+			assets INTEGER NOT NULL,
+			payload TEXT NOT NULL
+		) WITHOUT ROWID`,
+		`CREATE INDEX trash_repo ON trash (repo, deleted_at)`,
+		`CREATE TABLE cleanup_reports (
+			repo TEXT PRIMARY KEY,
+			at INTEGER NOT NULL,
+			enforced INTEGER NOT NULL,
+			body TEXT NOT NULL
+		) WITHOUT ROWID`,
+	},
 }
 
 // Version is the number of the schema this program writes.

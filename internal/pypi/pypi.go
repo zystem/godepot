@@ -30,6 +30,14 @@ func New(base *raw.Raw) *PyPI {
 	p := &PyPI{Raw: &r}
 	r.Self = p
 	r.Layout = &raw.Layout{
+		Unit: func(path string) (string, string, bool) {
+			if t, ok := parse(path); ok && t.kind == kFile {
+				if f, ok := parseFilename(strings.TrimSuffix(t.filename, ".metadata")); ok {
+					return f.project, f.version, true
+				}
+			}
+			return "", "", false
+		},
 		// The name is the project, normalised.
 		Name: func(path string) string {
 			if t, ok := parse(path); ok && t.project != "" {

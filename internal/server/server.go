@@ -14,9 +14,11 @@ import (
 
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
+	"github.com/zystem/godepot/internal/cleanup"
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/settings"
+	"github.com/zystem/godepot/internal/trash"
 )
 
 // Server is the door.
@@ -25,6 +27,9 @@ type Server struct {
 	Auth     *auth.Store
 	Audit    *audit.Log
 	Formats  map[string]format.Format
+	// Cleanup runs the policies of the repositories and Trash holds what they and people remove (docs/spec.md, C1 to C3); nil: the calls that need them answer 404.
+	Cleanup *cleanup.Engine
+	Trash   *trash.Trash
 	// Refused counts the refusals by reason (unauthenticated, forbidden); nil: not counted.
 	Refused *metrics.Counter
 }

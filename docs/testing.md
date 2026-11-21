@@ -112,6 +112,19 @@ group     ok       com.acme:internal is not found, and Maven Central was not ask
 
 (The output of 2026-11-21, Maven 3.8.7, JDK 21.)
 
+## Cleanup and the trash: the program on its own
+
+`tools/test/cleanup-run.sh` starts the program with a raw repository whose policy removes everything but `keep/**`, puts four files (one with the same bytes as a kept one), asks for the dry report, turns `enforce` on with a `SIGHUP`, and lets the program run the policy by itself. It then looks at the trash, restores one file with the API, empties the rest and waits for the bytes to leave the store. It needs the stand; it takes about two minutes (the policy runs every 60 seconds).
+
+```
+dry       ok       the dry report names 3 files of 600000 bytes and says 500000 would be freed (f1's bytes are also kept as keep/dup-of-f1.bin)
+enforce   ok       the program ran the policy by itself: 3 files gone, keep/ kept, 3 items in the trash, no byte freed yet
+restore   ok       f2.bin came back from the trash, equal to what was written
+freed     ok       the trash emptied: 300000 bytes gone from the store (f3); f1 stays held by its kept twin, f2 is back
+```
+
+(The output of 2026-11-21.)
+
 ## What the variables do
 
 | Variable | Meaning |

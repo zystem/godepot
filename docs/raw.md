@@ -51,7 +51,7 @@ The answer is `{"items": [{"path", "size", "sha256", "content_type", "created_at
 
 ## Delete: `DELETE /repository/<repository>/<path>`
 
-Needs `delete`. `204`, or `404` when there is no such file. The file is gone at once; its bytes stay for `GODEPOT_GRACE_SECONDS` (24 hours by default), as they may be named by another file or by a push in progress, and are then removed by the collector ([blob-layer.md](blob-layer.md)). There is no trash and no restore yet (spec C3).
+Needs `delete`. `204`, or `404` when there is no such file. The file is gone at once and **goes to the trash** (`GODEPOT_TRASH_DAYS`, default 7), where it can be put back whole and still holds its bytes ([cleanup.md](cleanup.md)); the audit log has a line `remove`. When it is emptied (after the days, or by hand) its bytes stay for `GODEPOT_GRACE_SECONDS` (24 hours by default), as they may be named by another file or by a push in progress, and are then removed by the collector ([blob-layer.md](blob-layer.md)). With `GODEPOT_TRASH_DAYS=0` there is no trash and the audit line is `delete`.
 
 ## What is written
 

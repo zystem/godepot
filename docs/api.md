@@ -36,6 +36,11 @@ All of `/api/v1/` needs a token (`401` without). Bodies are JSON; an unknown wor
 | `GET /api/v1/tokens` (`?account=<name>`, `?all=1`) | the same; `account` of another and `all` need an admin account | lists tokens (never their secrets) |
 | `DELETE /api/v1/tokens/<id>` | the owner with such a token, or an admin account | revokes it, `204` |
 | `POST /api/v1/repositories/<name>/forget` (`?name=<key>`) | admin | for a proxy repository: clears what it remembers as "not found" (all of it, or the one key; the keys are `raw:<path>`, `manifest:<image>@<reference>`, `blob:<image>@<digest>`, `name:<image>`); with no `?name=` it also ends the pause after errors of its upstream. `200` with `{"repository", "forgotten": <rows>}`; `404` when the repository is not a proxy ([proxy.md](proxy.md)) |
+| `GET /api/v1/repositories/<name>/cleanup` | admin | the report the repository's policy would make now, changing nothing (`?report=last` is the last report that a run made). `404` for a repository with no policy ([cleanup.md](cleanup.md)) |
+| `POST /api/v1/repositories/<name>/cleanup` | admin | run the policy now: it removes only when the repository says `enforce`; the answer is the report |
+| `GET /api/v1/trash` (`?repository=<name>`) | admin | what is in the trash: `{"items": [...], "days": 7}`; each item has `id`, `repository`, `name`, `version`, `deleted_at`, `deleted_by`, `reason` (`delete` or `cleanup`), `bytes`, `assets`, `purge_at` |
+| `POST /api/v1/trash/<id>/restore` | admin | put the item back whole, with the same ids. `409` when something has been written at one of its paths since; `404` when it is gone |
+| `DELETE /api/v1/trash/<id>` | admin | empty the item now: its bytes are let go and are collected after the grace time. `204` |
 | `GET /api/v1/audit` (`?action=`, `?actor=`, `?limit=` up to 1000, `?before=<id>`) | admin | the audit log, newest first; `next` is the id to pass as `before` for the next page |
 | `GET /api/v1/repositories` | admin | the settings file as the program has it |
 

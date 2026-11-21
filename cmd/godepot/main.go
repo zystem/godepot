@@ -22,6 +22,7 @@ import (
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/blob"
 	"github.com/zystem/godepot/internal/blobgate"
+	"github.com/zystem/godepot/internal/cleanup"
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/gomod"
 	"github.com/zystem/godepot/internal/lease"
@@ -34,6 +35,7 @@ import (
 	"github.com/zystem/godepot/internal/raw"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
+	"github.com/zystem/godepot/internal/trash"
 	"github.com/zystem/godepot/internal/upstream"
 )
 
@@ -174,20 +176,25 @@ func splitList(s string) []string {
 }
 
 type app struct {
-	cfg    *Config
-	auth   *auth.Store
-	audit  *audit.Log
-	srv    *server.Server
-	db     *meta.Rqlite
-	store  *blobgate.Store
-	layer  *blob.Layer
-	oci    *oci.OCI
-	lease  *lease.Lease
-	m      *appMetrics
-	reg    *metrics.Registry
-	out    io.Writer
-	errOut io.Writer
-	log    *slog.Logger
+	cfg   *Config
+	auth  *auth.Store
+	audit *audit.Log
+	srv   *server.Server
+	db    *meta.Rqlite
+	store *blobgate.Store
+	layer *blob.Layer
+	oci   *oci.OCI
+	trash *trash.Trash
+	clean *cleanup.Engine
+	reads *format.ReadLog
+	lease *lease.Lease
+	// lastCleanup is when this replica, as the leader, last ran the policies.
+	lastCleanup time.Time
+	m           *appMetrics
+	reg         *metrics.Registry
+	out         io.Writer
+	errOut      io.Writer
+	log         *slog.Logger
 }
 
 type appMetrics struct {
@@ -228,8 +235,10 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	pool := &upstream.Pool{DB: a.db, M: a.m.upstream}
 	a.oci = &oci.OCI{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
 		Downloads: gate, Rate: int64(cfg.MinRate), UploadTTL: cfg.UploadTTL}
+	a.trash = &trash.Trash{DB: a.db, Blobs: a.layer, Audit: a.audit, Days: cfg.TrashDays}
+	a.reads = &format.ReadLog{}
 	rawFormat := &raw.Raw{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused,
-		Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active}
+		Downloads: gate, Rate: int64(cfg.MinRate), Active: a.m.active, LastRead: a.reads, Trash: a.trash}
 	a.srv = &server.Server{Auth: a.auth, Audit: a.audit, Refused: a.m.refused, Formats: map[string]format.Format{
 		"raw":   rawFormat,
 		"go":    gomod.New(rawFormat),
@@ -238,6 +247,13 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		"maven": maven.New(rawFormat),
 		"oci":   a.oci,
 	}}
+	a.clean = &cleanup.Engine{DB: a.db, Trash: a.trash, Audit: a.audit, Units: map[string]cleanup.Unitor{}}
+	for name, f := range a.srv.Formats {
+		if u, ok := f.(cleanup.Unitor); ok {
+			a.clean.Units[name] = u
+		}
+	}
+	a.srv.Cleanup, a.srv.Trash = a.clean, a.trash
 	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte
 	_, _ = rand.Read(rnd[:])
@@ -420,6 +436,7 @@ func (a *app) serve(ctx context.Context) error {
 	defer endBackground()
 	loopDone := make(chan struct{})
 	go func() { defer close(loopDone); a.background(bgCtx) }()
+	go a.flushReads(bgCtx) // every replica notes the reads it served
 	var err error
 	select {
 	case <-ctx.Done():
@@ -458,6 +475,59 @@ func (a *app) background(ctx context.Context) {
 	}
 }
 
+// flushReads writes the day of the last read of the components that were read, once a minute (docs/spec.md, C4); a last write is made when the program ends.
+func (a *app) flushReads(ctx context.Context) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_ = a.reads.Flush(c, a.db)
+			cancel()
+			return
+		case <-tick.C:
+			if err := a.reads.Flush(ctx, a.db); err != nil && ctx.Err() == nil {
+				a.log.Warn("the last reads were not written", "error", err.Error())
+			}
+		}
+	}
+}
+
+// policies runs the cleanup policies of the repositories (every CleanupEvery) and empties the trash of what is old.
+func (a *app) policies(ctx context.Context) {
+	if n, err := a.trash.Sweep(ctx, a.cfg.CollectBatch); err != nil {
+		a.m.passErrors.Add("", 1)
+		if ctx.Err() == nil {
+			a.log.Error("emptying the trash failed", "error", err.Error())
+		}
+	} else if n > 0 {
+		a.m.collected.Add("trash", int64(n))
+		a.log.Info("collected", "trash", n)
+	}
+	if time.Since(a.lastCleanup) < a.cfg.CleanupEvery {
+		return
+	}
+	a.lastCleanup = time.Now()
+	set := a.srv.Settings.Load()
+	if set == nil {
+		return
+	}
+	for i := range set.Repositories {
+		r := &set.Repositories[i]
+		if r.Cleanup == nil || ctx.Err() != nil {
+			continue
+		}
+		rep, err := a.clean.Run(ctx, r, r.Cleanup.Enforce, "cleanup")
+		if err != nil {
+			a.m.passErrors.Add("", 1)
+			a.log.Error("a cleanup policy failed", "repository", r.Name, "error", err.Error())
+			continue
+		}
+		a.log.Info("cleanup", "repository", r.Name, "enforced", rep.Enforced, "versions", len(rep.Remove), "bytes", rep.Bytes, "freed", rep.Freed)
+	}
+}
+
 func (a *app) pass(ctx context.Context) {
 	held, err := a.lease.Acquire(ctx)
 	if err != nil {
@@ -481,6 +551,7 @@ func (a *app) pass(ctx context.Context) {
 		a.m.collected.Add("oci_uploads", int64(n))
 		a.log.Info("collected", "oci_uploads", n)
 	}
+	a.policies(ctx)
 	for i := 0; i < 20 && ctx.Err() == nil; i++ { // a full batch means there is more: go on at once, but give the lease a turn
 		got, err := a.layer.Collect(ctx, a.cfg.CollectBatch)
 		a.m.passes.Add("", 1)
