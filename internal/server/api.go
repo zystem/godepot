@@ -22,6 +22,14 @@ import (
 //
 // A token never has more than its account has (the account's grants and the token's scope must both allow), so making a token with a wide scope gives nothing that the account lacks.
 func (s *Server) api(w http.ResponseWriter, r *http.Request) {
+	switch strings.Trim(strings.TrimPrefix(r.URL.Path, apiPrefix), "/") {
+	case "login": // the one call that needs no token: the password is the credential
+		s.login(w, r)
+		return
+	case "password":
+		s.changePassword(w, r)
+		return
+	}
 	p := s.principal(w, r, fail)
 	if p == nil {
 		return
@@ -39,6 +47,8 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.accounts(w, r, p)
 	case len(parts) == 3 && parts[0] == "accounts" && r.Method == http.MethodPost && (parts[2] == "disable" || parts[2] == "enable"):
 		s.disable(w, r, p, parts[1], parts[2] == "disable")
+	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "password":
+		s.setPassword(w, r, p, parts[1])
 	case len(parts) == 1 && parts[0] == "tokens":
 		s.tokens(w, r, p)
 	case len(parts) == 2 && parts[0] == "tokens" && r.Method == http.MethodDelete:

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha1" //nolint:gosec // dist.shasum of npm
 	"crypto/sha512"
 	"encoding/base64"
@@ -16,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zystem/godepot/internal/auth"
 )
 
 // tgz makes a tarball as `npm pack` does: the files are under package/.
@@ -222,7 +225,7 @@ func TestNPMPublishRefusals(t *testing.T) {
 	if !strings.Contains(string(who.body), `"username":"root"`) {
 		t.Fatalf("whoami: %s", who.body)
 	}
-	r.expect(r.do("PUT", "/repository/npm/-/user/org.couchdb.user:x", strings.NewReader("{}")), 501)
+	r.expect(r.do("PUT", "/repository/npm/-/user/org.couchdb.user:x", strings.NewReader("{}")), 400) // npm login needs a name and a password (TestNPMLogin)
 	r.expect(r.get("/repository/npm/-/npm/v1/security/advisories/bulk"), 404)
 }
 
@@ -440,4 +443,64 @@ func TestNPMGroup(t *testing.T) {
 	r.expect(r.get("/repository/all/Corp-Lib"), 404)
 	// A group with no write_to refuses a publish.
 	r.expect(r.get("/repository/all/-/ping"), 200)
+}
+
+func init() { auth.Rounds = 1000 }
+
+// npm login: the password for a token, as `npm login` does it.
+func TestNPMLogin(t *testing.T) {
+	r := newRig(t, repos(`{"name": "npm", "format": "npm", "kind": "hosted"}`))
+	if err := r.auth.CreateAccount(context.Background(), "dev", "user", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.auth.SetPassword(context.Background(), "dev", "dev has a password"); err != nil {
+		t.Fatal(err)
+	}
+	login := func(user, body string) reply {
+		req, _ := http.NewRequest("PUT", r.ts.URL+"/repository/npm/-/user/org.couchdb.user:"+user, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req) // no token: npm has none yet
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return reply{code: resp.StatusCode, hd: resp.Header, body: b}
+	}
+	a := login("dev", `{"name": "dev", "password": "dev has a password"}`)
+	var out struct {
+		OK    bool
+		Token string
+	}
+	if a.code != 201 || json.Unmarshal(a.body, &out) != nil || !out.OK || !strings.HasPrefix(out.Token, "gd_") {
+		t.Fatalf("login: %d %s", a.code, a.body)
+	}
+	// The token works as npm uses it: a bearer token. It may write (publish) and read, and has no admin.
+	pub := publishBody("login-pkg", "1.0.0", "latest", tgz("login-pkg", "1.0.0", nil), nil)
+	req, _ := http.NewRequest("PUT", r.ts.URL+"/repository/npm/login-pkg", bytes.NewReader(pub))
+	req.Header.Set("Authorization", "Bearer "+out.Token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	// The account has no grant in these settings (grants is empty), so the publish is refused: the token is not more than its account.
+	if resp.StatusCode != 403 {
+		t.Fatalf("a token of an account with no grant: %d", resp.StatusCode)
+	}
+	if w := login("dev", `{"name": "dev", "password": "wrong password here"}`); w.code != 401 {
+		t.Fatalf("wrong password: %d %s", w.code, w.body)
+	}
+	if w := login("dev", `{"name": "other", "password": "dev has a password"}`); w.code != 400 {
+		t.Fatalf("a name that is not the address's: %d", w.code)
+	}
+	if w := login("nobody", `{"name": "nobody", "password": "no such account at all"}`); w.code != 401 {
+		t.Fatalf("no account: %d", w.code)
+	}
+	for i := 0; i < auth.LockAfter; i++ {
+		login("dev", `{"name": "dev", "password": "wrong password here"}`)
+	}
+	if w := login("dev", `{"name": "dev", "password": "dev has a password"}`); w.code != 429 || w.hd.Get("Retry-After") == "" {
+		t.Fatalf("a locked account: %d", w.code)
+	}
 }
