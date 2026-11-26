@@ -24,7 +24,7 @@ The second prints the token on the standard output and the rest (id, end date) o
 
 ## The API
 
-All of `/api/v1/` needs a token (`401` without). Bodies are JSON; an unknown word in a body is `400`.
+All of `/api/v1/` needs a token (`401` without), except `login`, `password` and `oidc/token`, whose credential is in the body. Bodies are JSON; an unknown word in a body is `400`.
 
 | Call | Who | Does |
 |---|---|---|
@@ -35,6 +35,7 @@ All of `/api/v1/` needs a token (`401` without). Bodies are JSON; an unknown wor
 | `PUT /api/v1/accounts/<name>/password` `{"password"}` | admin | sets the password of a **user** account (12 to 128 bytes; a robot has none: `400`). `204`. `DELETE` on the same address clears it: the account gets in with tokens only |
 | `POST /api/v1/login` `{"account", "password", "life_seconds", "repositories", "paths", "actions", "note"}` | **no token**: the password is the credential | the password for a token (`201`, `{"token", "account", "expires_at"}`, shown once). With only the account and the password the token has `read`, `write`, `delete` and `promote` on every repository for 12 hours; the other words narrow it (a token never has more than its account, and ends within `GODEPOT_TOKEN_MAX_DAYS`). `401` for any login that is not good, in the same words for a wrong password, no such account, a disabled one and one with no password; `429` with `Retry-After` for a locked account or too many failures from one address |
 | `POST /api/v1/password` `{"account", "password", "new_password"}` | **no token**: the old password | a user changes their own password. `204`; `401`, `429` as for a login |
+| `POST /api/v1/oidc/token` `{"token": "<the job's token>", "account"}` | **no token**: the signed token of a trusted issuer is the credential | a CI job's token for a token of godepot that lives 15 minutes (`201`, `{"token", "account", "expires_at"}`), as the trusts of the settings say ([ci-jobs.md](ci-jobs.md)); `account` chooses among several trusts that fit. `401` for a token that is not accepted (the same words for every reason), `403` when no trust fits or its account cannot be used, `429` after too many refused from one address, `503` when the issuer's keys cannot be read |
 | `POST /api/v1/tokens` `{"account": "<name>", "scope": [{"repositories": [...], "paths": [...], "actions": [...]}], "life_seconds": 3600, "note": ""}` | a token with the action `admin` on `*` (for its own account; `account` left out means its own), an admin account for any account | makes a token. `201` with `{"token": "...", "info": {...}}`: **the only time the secret is shown**. `400` for a life that is missing or longer than the longest, for no scope, or a bad scope |
 | `GET /api/v1/tokens` (`?account=<name>`, `?all=1`) | the same; `account` of another and `all` need an admin account | lists tokens (never their secrets) |
 | `DELETE /api/v1/tokens/<id>` | the owner with such a token, or an admin account | revokes it, `204` |
@@ -56,6 +57,10 @@ One line in the log (JSON on the standard error, message `audit`) and one row in
 - The row of a write or a delete is written **in the same transaction** as the change. The row of a refusal, of an account and of a token is written after the thing it describes, by itself.
 - Reads are not audited (they are counted: [metrics.md](metrics.md)).
 - The log is shipped like any log. The rows are not removed by the program.
+
+## Tokens of CI jobs
+
+The audit action is `oidc.exchange`: `ok` with the actor the robot and the detail `token <id>, issuer <name>, sub <sub>`, or `refused` with the actor `oidc` and why. The job's token is in no log.
 
 ## Passwords
 

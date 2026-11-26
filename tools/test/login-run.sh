@@ -4,13 +4,13 @@
 # types it) gets a token from the registry and publishes with it. It needs the stand of blobgate-stand.sh, npm and python3:
 #   eval "$(tools/test/blobgate-stand.sh start)"
 #   tools/test/login-run.sh
-# It starts the program on port 18990 (metrics 18992), prints one line for each, and exits 1 when anything failed.
+# It starts the program on port 19090 (metrics 19092), prints one line for each, and exits 1 when anything failed.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 : "${GODEPOT_RQLITE_URL:?run the stand first: eval \"\$(tools/test/blobgate-stand.sh start)\"}"
 : "${GODEPOT_BLOBGATE_URL:?run the stand first}"
 work="$(mktemp -d)"
-port=18990 mport=18992 fail=0
+port=19090 mport=19092 fail=0
 repo="npm-$RANDOM$RANDOM"; acct="dev$RANDOM$RANDOM"; admin="root$RANDOM$RANDOM"; pw="$acct has a password"
 trap 'kill "${pid:-}" 2>/dev/null; rm -rf "$work"' EXIT
 go build -o "$work/godepot" ./cmd/godepot || exit 1

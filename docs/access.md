@@ -11,10 +11,13 @@ Explanation. Who may do what, how a request is checked, and the reasons. The cal
 - **Anonymous read** is a setting of a repository, off by default.
 - Accounts can be **disabled**: all their tokens stop at once, and come back when the account is enabled. A token can be **revoked** for good.
 
-OIDC and LDAP are not here yet (step 8 of the plan, the next parts). A user logs in with a password or a token that an admin made.
+A **CI job** may get in with no stored secret: the signed token that its CI gives it is exchanged for a token of a robot that lives 15 minutes ([ci-jobs.md](ci-jobs.md)).
+
+Single sign-on of people (OIDC in a browser) and LDAP are not here yet (step 8 of the plan, the next parts). A user logs in with a password or a token that an admin made.
 
 ## Why it is shaped so
 
+- **A job's token is exchanged, not accepted everywhere.** Every format and call then sees one kind of credential, with an owner, a scope, an end and a line in the audit log. The settings say who is trusted, the account says the most it may do, and the trust narrows it; a job is never an admin, and never a user.
 - **Passwords came after tokens, and give tokens.** Tokens with an end date, a scope and an owner are what every client can send (`curl -u`, `pip`, Maven, `apt`), so they came first. A password is for a person at a terminal (`npm login`, `docker login`, `POST /api/v1/login`): it is checked with a hash that costs time, locks the account after five failures, tells nothing about which names exist, and **never opens the admin API**, so a password that leaks gives the data actions of the account and not the control of the program. A script uses a token.
 - **The account and the token must both allow.** The settings file says what an account may do; a token can only narrow it. Making a token is then safe to let a user do for oneself, and a token in a CI job can be narrow without a second place to keep rules.
 - **A token always ends.** Tokens that never end, shared by a team and pasted into CI settings, are a trap of other products ([plan.md](plan.md), T31).

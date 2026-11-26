@@ -148,7 +148,27 @@ lock      ok       five wrong passwords: 429 (Retry-After 59 s) for login and ba
 log       ok       the password is nowhere in the log of the program
 ```
 
-(The output of 2026-11-22, npm 9.2.0.)
+(The output of 2026-11-22, npm 9.2.0. Since 2026-11-26 the script uses ports 19090 and 19092: it had those of `policy-run.sh`.)
+
+## CI jobs: the exchange of a signed token
+
+`tools/test/oidc-run.sh` starts the program with a robot, a trust, and an issuer that is not our code: `openssl` makes the key and signs the job tokens, the web server of `python3` publishes the discovery document and the keys. Its last line reads the keys of GitHub's real issuer (skipped without a network). It needs the stand, `openssl`, `python3`, `curl` and `jq`; ports 19190 to 19192.
+
+```
+exchange  ok       a token signed by openssl gave a godepot token for 900 s; it published releases/app-1.0 (201), not other/x (403), and opens no admin call (403)
+refused   ok       a job of another repository 403, an expired token 401, a changed signature 401
+log       ok       the audit lines of oidc.exchange are there; neither the job's token nor godepot's is in the log
+github    ok       the keys of GitHub's issuer were read (key cc413527-173f-5a05-976e-9c52b1d7b431); a token with that key id signed by us is 401, "the signature is not right"
+```
+
+(The output of 2026-11-26.)
+
+**A real job of GitHub Actions** was run once, on 2026-11-26, by a temporary workflow of this repository with the permission `id-token: write`: rqlite, blobgate and godepot inside the runner, the job's own token exchanged. The workflow was removed after, and its commit was taken out of the history of the branch. Its lines:
+
+```
+exchange: 201, account ci-real, for 900 s
+publish releases/readme: 201 (read back, same bytes); publish other/readme: 403; token for another audience: 401
+```
 
 ## What the variables do
 
