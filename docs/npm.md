@@ -21,7 +21,7 @@ npm deprecate pkg@1.0.0 "use 1.1"
 npm unpublish pkg@1.0.0 --force
 ```
 
-There is **no `npm login` / `npm adduser`**: godepot has no passwords for accounts, only tokens. `PUT /-/user/...` is `501` and says so. A repository with `anonymous_read` needs no token to install.
+`npm login` works for an account that has a password ([api.md](api.md)): `npm login --registry=http://HOST/repository/<repository>/ --auth-type=legacy` asks for the user name and the password, and writes a token (12 hours, the data actions of the account) to `.npmrc`. There is no sign up: an admin makes the account and sets the password. (Run with the real `npm` 9.2.0, typed at a terminal: [testing.md](testing.md).) A repository with `anonymous_read` needs no token to install.
 
 ## The requests
 
@@ -40,7 +40,7 @@ The paths follow the name of the repository. A scope may be sent as `@scope/name
 | `DELETE -/package/<pkg>/dist-tags/<tag>` | `npm dist-tag rm`. `latest` is not removed (`400`): move it |
 | `GET -/ping` | `200 {}` (`npm ping`) |
 | `GET -/whoami` | `{"username": "<account>"}`; `401` with no token |
-| `PUT -/user/...` | `501`: there is no npm login |
+| `PUT -/user/org.couchdb.user:<name>` `{"name", "password"}` | `npm login`: `201` and `{"ok": true, "token": "gd_..."}`; `401` for a login that is not good, `429` for a locked account; `400` when the name is not the address's |
 | the rest of `-/...` | `404`: **audit and search are not built**. `npm install` goes on (set `audit=false` to not ask) |
 
 Every error is `{"error": "<words>"}`. A write to a proxy is `405`.

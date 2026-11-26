@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -41,11 +42,15 @@ import (
 
 var version = "dev"
 
+// stdin is where set-password reads the password (a test replaces it).
+var stdin io.Reader = os.Stdin
+
 const usage = `usage: godepot <command>
 
   serve        run: migrate the database, serve the repositories and the API, do the background work while holding the lease
   validate     check the settings and the settings file, and that the database and blobgate can be used (writes nothing that stays)
   new-account  make an account: new-account NAME [-robot] [-admin]
+  set-password set the password of a user account: the password is the first line of the standard input: set-password NAME
   new-token    make a token and print it once: new-token ACCOUNT -life 720h -repositories files -actions read,write [-paths 'releases/**']
   migrate      bring the schema of the database to the one this program writes, and stop
   check        try the store: a write of unknown length, a link, a range, a listing, a delete
@@ -77,7 +82,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
-	case "serve", "validate", "migrate", "check", "reconcile", "new-account", "new-token":
+	case "serve", "validate", "migrate", "check", "reconcile", "new-account", "new-token", "set-password":
 	default:
 		fmt.Fprintf(stderr, "godepot: no command %q\n\n%s", cmd, usage)
 		return exitUsage
@@ -108,11 +113,11 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "godepot: -fix is for reconcile")
 		return exitUsage
 	}
-	if cmd != "new-account" && cmd != "new-token" && len(rest) > 0 {
+	if cmd != "new-account" && cmd != "new-token" && cmd != "set-password" && len(rest) > 0 {
 		fmt.Fprintf(stderr, "godepot: %s takes no arguments (it has %q)\n", cmd, rest[0])
 		return exitUsage
 	}
-	if (cmd == "new-account" || cmd == "new-token") && len(rest) != 1 {
+	if (cmd == "new-account" || cmd == "new-token" || cmd == "set-password") && len(rest) != 1 {
 		fmt.Fprintf(stderr, "godepot: %s takes the name of one account\n\n%s", cmd, usage)
 		return exitUsage
 	}
@@ -152,6 +157,20 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 			if rerr = a.auth.CreateAccount(ctx, rest[0], kind, *admin); rerr == nil {
 				a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "account.create", Result: audit.OK, Detail: rest[0] + " " + kind})
 				fmt.Fprintf(stdout, "account %s (%s) made\n", rest[0], kind)
+			}
+		}
+	case "set-password":
+		// The password is read from the standard input, never from an argument (an argument is in the list of processes and in the history of a shell).
+		pw, perr := bufio.NewReader(stdin).ReadString('\n')
+		if perr != nil && pw == "" {
+			fmt.Fprintln(stderr, "godepot set-password: the password is the first line of the standard input")
+			return exitUsage
+		}
+		pw = strings.TrimRight(pw, "\r\n")
+		if rerr = a.start(ctx, false); rerr == nil {
+			if rerr = a.auth.SetPassword(ctx, rest[0], pw); rerr == nil {
+				a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "password.set", Result: audit.OK, Detail: rest[0]})
+				fmt.Fprintf(stdout, "the password of %s is set\n", rest[0])
 			}
 		}
 	case "new-token":

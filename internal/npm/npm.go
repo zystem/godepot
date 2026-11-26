@@ -106,7 +106,7 @@ func (p *NPM) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 		ok(w, http.StatusOK, map[string]string{"username": q.Principal.Account})
 		return
 	case kUser:
-		fail(w, http.StatusNotImplemented, "godepot has no npm login: make a token with the API and put it in .npmrc as //<host>/repository/<repository>/:_authToken=<token>")
+		p.login(w, r, q)
 		return
 	case kOther:
 		fail(w, http.StatusNotFound, "this registry does not have that: audit and search are not built")
@@ -397,4 +397,43 @@ func (p *NPM) hostedDoc(w http.ResponseWriter, r *http.Request, q format.Request
 		return
 	}
 	send(w, r, b, abbrev, nil)
+}
+
+// login is `npm login` (and `npm adduser`): PUT -/user/org.couchdb.user:<name> with {"name", "password"}. The password is checked, and the answer has a token, which npm writes to .npmrc. There is no sign
+// up: an account is made by an admin (docs/spec.md, A5).
+func (p *NPM) login(w http.ResponseWriter, r *http.Request, q format.Request) {
+	user, ok := strings.CutPrefix(q.Path, "-/user/org.couchdb.user:")
+	if r.Method != http.MethodPut || !ok || user == "" || q.Login == nil {
+		fail(w, http.StatusNotImplemented, "this registry takes npm login as PUT -/user/org.couchdb.user:<name>; an account is made by an admin")
+		return
+	}
+	var body struct {
+		Name     string `json:"name"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil || body.Name != user {
+		fail(w, http.StatusBadRequest, "the body is {\"name\": ..., \"password\": ...} and the name is that of the address")
+		return
+	}
+	tok, err := q.Login(r.Context(), body.Name, body.Password, "npm login")
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store")
+		ok201 := map[string]any{"ok": true, "id": "org.couchdb.user:" + user, "token": tok}
+		w.Header().Set("Content-Type", mimeJSON)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(ok201)
+	case errors.Is(err, auth.ErrInvalid):
+		fail(w, http.StatusUnauthorized, "the account or the password is not right")
+	case errors.Is(err, auth.ErrLocked), errors.Is(err, auth.ErrBusy):
+		w.Header().Set("Retry-After", "30")
+		fail(w, http.StatusTooManyRequests, "too many logins: try again later")
+	default:
+		if strings.Contains(err.Error(), "too many failed logins") {
+			w.Header().Set("Retry-After", "30")
+			fail(w, http.StatusTooManyRequests, "too many logins: try again later")
+			return
+		}
+		p.unavailable(w)
+	}
 }
