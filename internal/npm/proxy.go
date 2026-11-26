@@ -11,10 +11,13 @@ import (
 	"errors"
 	"hash"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/format"
+	"github.com/zystem/godepot/internal/policy"
 	"github.com/zystem/godepot/internal/raw"
 )
 
@@ -51,6 +54,8 @@ type upDoc struct {
 	DistTags map[string]string          `json:"dist-tags"`
 	Versions map[string]json.RawMessage `json:"versions"`
 	Modified string                     `json:"modified"`
+	// Time is when each version was published (the full packument has it; the abbreviated has not).
+	Time map[string]string `json:"time"`
 }
 
 type upVersion struct {
@@ -112,17 +117,16 @@ func (p *NPM) proxyDoc(w http.ResponseWriter, r *http.Request, q format.Request,
 	if v := c.h.Get("Warning"); v != "" {
 		extra.Set("Warning", v) // the copy is stale: the upstream could not be asked
 	}
-	if t.kind == kTags {
-		b, _ := json.Marshal(d.DistTags)
-		send(w, r, b, false, extra)
-		return
-	}
 	root := base(r, q)
+	pol := q.Repo.Upstream.Policy()
 	versions := map[string]json.RawMessage{}
 	for v, raw := range d.Versions {
 		var uv upVersion
 		if json.Unmarshal(raw, &uv) != nil || uv.Name != t.pkg || uv.Version != v || !validVersion(v) {
 			continue
+		}
+		if !pol.Version(t.pkg, v, published(d, v), p.now()).OK {
+			continue // held back by the cooldown or the block list: not in the document
 		}
 		var m map[string]json.RawMessage
 		_ = json.Unmarshal(raw, &m)
@@ -143,6 +147,17 @@ func (p *NPM) proxyDoc(w http.ResponseWriter, r *http.Request, q format.Request,
 			tags[tag] = v
 		}
 	}
+	if _, ok := tags["latest"]; !ok && d.DistTags["latest"] != "" {
+		// The latest is held back: the highest version that is left (and is no prerelease, if any is not) takes its place, so that a plain install gets something.
+		if v := highest(versions); v != "" {
+			tags["latest"] = v
+		}
+	}
+	if t.kind == kTags {
+		b, _ := json.Marshal(tags)
+		send(w, r, b, false, extra)
+		return
+	}
 	out := map[string]any{"name": t.pkg, "dist-tags": tags, "versions": versions}
 	if d.Modified != "" {
 		out["modified"] = d.Modified
@@ -160,6 +175,10 @@ func (p *NPM) source(ctx context.Context, h *raw.Raw, q format.Request, path str
 	}
 	switch t.kind {
 	case kCached:
+		if q.Repo.Upstream != nil && q.Repo.Upstream.Cooldown != nil {
+			// A cooldown needs the time of each version, which only the full packument has.
+			return &raw.Source{Path: t.pkg, Header: http.Header{"Accept": {mimeJSON}}}, nil
+		}
 		return &raw.Source{Path: t.pkg, Header: http.Header{"Accept": {mimeAbbrev + ", " + mimeJSON + "; q=0.8"}}}, nil
 	case kTarball:
 	default:
@@ -222,4 +241,100 @@ func named(integrity, shasum string) (*raw.Hash, error) {
 		return &raw.Hash{New: sha1New, Sum: sum}, nil // the only hash this upstream names
 	}
 	return nil, errors.New("the upstream names no hash of this tarball (dist.integrity or dist.shasum)")
+}
+
+func (p *NPM) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
+}
+
+// published is when the upstream published the version (the zero time when its packument does not say).
+func published(d *upDoc, v string) time.Time {
+	t, err := time.Parse(time.RFC3339, d.Time[v])
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// refuse answers a request for a version that the policy holds back, 403 with the words of the verdict (a client that asks by name is told why and when).
+func refuse(w http.ResponseWriter, v policy.Verdict) {
+	if !v.Until.IsZero() {
+		w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64(time.Until(v.Until).Seconds())), 10))
+	}
+	fail(w, http.StatusForbidden, v.Why)
+}
+
+// tarballAllowed sees that the policy lets the tarball of a version of a proxy go: the block list by name, then the cooldown against the time in the packument. It answers the client when not.
+func (p *NPM) tarballAllowed(w http.ResponseWriter, r *http.Request, q format.Request, t target) bool {
+	pol := q.Repo.Upstream.Policy()
+	if !pol.Active() {
+		return true
+	}
+	v, _ := version(t.pkg, t.file)
+	if verdict, blocked := pol.Blocked(t.pkg, v); blocked {
+		refuse(w, verdict)
+		return false
+	}
+	if pol.Cooldown <= 0 {
+		return true
+	}
+	d, c, err := p.cached(r.Context(), r, q, t.pkg)
+	if err != nil || d == nil {
+		code := http.StatusBadGateway
+		if c != nil && c.code == http.StatusNotFound {
+			code = http.StatusNotFound
+		}
+		fail(w, code, "the packument of the package is not available, so the cooldown cannot be checked")
+		return false
+	}
+	if verdict := pol.Version(t.pkg, v, published(d, v), p.now()); !verdict.OK {
+		refuse(w, verdict)
+		return false
+	}
+	return true
+}
+
+// highest is the highest version of the set: of those with no prerelease when there are some.
+func highest(versions map[string]json.RawMessage) string {
+	best, bestPre := "", ""
+	for v := range versions {
+		if strings.Contains(v, "-") {
+			if bestPre == "" || semverLess(bestPre, v) {
+				bestPre = v
+			}
+			continue
+		}
+		if best == "" || semverLess(best, v) {
+			best = v
+		}
+	}
+	if best == "" {
+		return bestPre
+	}
+	return best
+}
+
+// semverLess orders two versions by their numbers (a prerelease is not told from a release: the callers have separated them).
+func semverLess(a, b string) bool {
+	pa, pb := nums(a), nums(b)
+	for i := 0; i < 3; i++ {
+		if pa[i] != pb[i] {
+			return pa[i] < pb[i]
+		}
+	}
+	return a < b
+}
+
+func nums(v string) [3]int {
+	v, _, _ = strings.Cut(v, "+")
+	v, _, _ = strings.Cut(v, "-")
+	var out [3]int
+	for i, s := range strings.SplitN(v, ".", 3) {
+		n, _ := strconv.Atoi(s)
+		out[i] = n
+	}
+	return out
 }

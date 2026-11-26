@@ -125,6 +125,18 @@ freed     ok       the trash emptied: 300000 bytes gone from the store (f3); f1 
 
 (The output of 2026-11-21.)
 
+## Cooldown and block lists: npm, pip and go
+
+`tools/test/policy-run.sh` starts the program with six proxy repositories (a cooldown and a block list for each of npm, pypi and go, in front of registry.npmjs.org, pypi.org and proxy.golang.org). It asks each registry when the two newest versions of `left-pad`, `six` and `github.com/google/uuid` were published, sets the cooldown **between the two ages** so that only the newest is young, and runs the real `npm`, `pip` and `go`: they must take the older version, and the newer one by name must be `403` with the time it will be served; with a block list naming the newest, the same. It needs the stand, `npm`, `python3` with venv, `go` and the network; it takes under a minute.
+
+```
+npm       ok       cooldown 77278h: npm install left-pad took 1.2.0 (the latest, 1.3.0, is held back); 1.3.0 by name is 403 "...will be served from..."; with the block list the same
+pip       ok       cooldown 32913h: pip took six 1.16.0 (1.17.0 is held back and not in the index); pip install six==1.17.0 fails; with the block list the same
+go        ok       cooldown 25291h: go get github.com/google/uuid took v1.5.0, not v1.6.0, the latest (held back; by name 403); with the block list: v1.5.0
+```
+
+(The output of 2026-11-21: npm 9.2.0, pip from a Python 3.12 venv, go 1.26.11. The cooldowns are long because the versions are old: the point is that the newest is on one side of the line.)
+
 ## Passwords: the program, and the real `npm login`
 
 `tools/test/login-run.sh` starts the program with a hosted npm repository and an account with a password set by `godepot set-password` (from the standard input). It checks the password in basic authentication and in `POST /api/v1/login`, runs the real `npm login` **typed at a terminal** (a pseudo-terminal) and publishes with the token it wrote, and locks the account with five wrong passwords. It needs the stand, `npm` and `python3`; it takes seconds.

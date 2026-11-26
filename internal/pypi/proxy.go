@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/format"
+	"github.com/zystem/godepot/internal/policy"
 	"github.com/zystem/godepot/internal/raw"
 )
 
@@ -110,11 +113,15 @@ func (p *PyPI) proxyIndex(w http.ResponseWriter, r *http.Request, q format.Reque
 	}
 	var files []entry
 	seen := map[string]bool{}
+	pol := q.Repo.Upstream.Policy()
 	for _, f := range idx.Files {
 		fp, ok := parseFilename(f.Filename)
 		sha := strings.ToLower(f.Hashes["sha256"])
 		if !ok || fp.project != project || len(sha) != 64 || seen[f.Filename] {
 			continue
+		}
+		if !pol.Version(project, fp.version, uploaded(f.UploadTime), p.now()).OK || pol.BlockedDigest("sha256:"+sha) {
+			continue // held back by the cooldown or the block list: not in the index
 		}
 		seen[f.Filename] = true
 		e := entry{Filename: f.Filename, SHA256: sha, Size: f.Size, RequiresPython: f.RequiresPython, UploadTime: f.UploadTime}
@@ -193,4 +200,76 @@ func (p *PyPI) source(ctx context.Context, h *raw.Raw, q format.Request, path st
 		return s, nil
 	}
 	return nil, raw.ErrNoSource
+}
+
+func (p *PyPI) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
+}
+
+// uploaded reads the time of an upload in an index (the zero time when there is none).
+func uploaded(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// fileAllowed sees that the policy lets a file of a proxy go: the block list by name and version, then the cooldown against the time in the index. It answers the client when not.
+func (p *PyPI) fileAllowed(w http.ResponseWriter, r *http.Request, q format.Request, t target) bool {
+	pol := q.Repo.Upstream.Policy()
+	if !pol.Active() {
+		return true
+	}
+	fp, ok := parseFilename(strings.TrimSuffix(t.filename, ".metadata"))
+	if !ok {
+		return true
+	}
+	refuse := func(v policy.Verdict) bool {
+		if !v.Until.IsZero() {
+			w.Header().Set("Retry-After", strconv.FormatInt(max(1, int64(time.Until(v.Until).Seconds())), 10))
+		}
+		reply(w, http.StatusForbidden, v.Why)
+		return false
+	}
+	if v, blocked := pol.Blocked(t.project, fp.version); blocked {
+		return refuse(v)
+	}
+	if pol.Cooldown <= 0 && !hasDigestRule(pol) {
+		return true
+	}
+	idx, c, err := p.cached(r.Context(), r, q, t.project)
+	if err != nil || idx == nil {
+		code := http.StatusBadGateway
+		if c != nil && c.code == http.StatusNotFound {
+			code = http.StatusNotFound
+		}
+		reply(w, code, "the index of the project is not available, so the cooldown cannot be checked")
+		return false
+	}
+	want := strings.TrimSuffix(t.filename, ".metadata")
+	for _, f := range idx.Files {
+		if f.Filename == want {
+			if pol.BlockedDigest("sha256:" + strings.ToLower(f.Hashes["sha256"])) {
+				return refuse(policy.Verdict{Blocked: true, Why: want + " is on the block list of this repository (by its digest)"})
+			}
+			if v := pol.Version(t.project, fp.version, uploaded(f.UploadTime), p.now()); !v.OK {
+				return refuse(v)
+			}
+			return true
+		}
+	}
+	return true // a file the index does not list is a 404 of raw's
+}
+
+func hasDigestRule(p *policy.Policy) bool {
+	for _, r := range p.Block {
+		if r.Digest != "" {
+			return true
+		}
+	}
+	return false
 }

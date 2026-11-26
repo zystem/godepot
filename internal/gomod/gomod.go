@@ -89,6 +89,9 @@ func (g *Go) Serve(w http.ResponseWriter, r *http.Request, q format.Request) {
 			reply(w, http.StatusMethodNotAllowed, "a proxy repository is read-only")
 			return
 		}
+		if q.Repo.Kind == "proxy" && g.policed(w, r, q, t) {
+			return // the cooldown and the lists answered
+		}
 		g.Raw.Serve(w, r, q) // a proxy fetches and keeps; a group finds the member that has the module
 		return
 	}
