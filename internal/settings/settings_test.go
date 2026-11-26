@@ -144,3 +144,46 @@ func TestCleanupSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuersAndTrusts(t *testing.T) {
+	ok := `{"repositories": [], "grants": [],
+	 "issuers": [{"name": "gh", "url": "https://token.actions.githubusercontent.com", "audience": "godepot"},
+	             {"name": "lab", "url": "http://10.0.0.1", "audience": "godepot", "allow_private": true, "jwks_url": "http://10.0.0.1/keys"}],
+	 "trusts": [{"issuer": "gh", "account": "ci", "claims": {"repository": "corp/app"}}]}`
+	s, err := settings.Parse(strings.NewReader(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := s.Trusts[0].Scope()
+	if len(g) != 1 || strings.Join(g[0].Repositories, ",") != "*" || strings.Join(g[0].Actions, ",") != "read,write" {
+		t.Fatalf("the default scope: %+v", g)
+	}
+	if s.IssuerByURL("https://token.actions.githubusercontent.com") == nil || s.IssuerByURL("https://token.actions.githubusercontent.com/") != nil {
+		t.Fatal("an issuer is found by its exact address")
+	}
+	issuer := func(more string) string { return `{"repositories": [], "grants": [], "issuers": [{` + more + `}]}` }
+	trust := func(more string) string {
+		return `{"repositories": [], "grants": [], "issuers": [{"name": "gh", "url": "https://a.example", "audience": "g"}], "trusts": [{"account": "ci", ` + more + `}]}`
+	}
+	for text, want := range map[string]string{
+		issuer(`"name": "Bad Name", "url": "https://a.example", "audience": "g"`):                                                      "name",
+		issuer(`"name": "a", "url": "a.example", "audience": "g"`):                                                                     "must be an address",
+		issuer(`"name": "a", "url": "http://a.example", "audience": "g"`):                                                              "not https",
+		issuer(`"name": "a", "url": "https://a.example", "audience": "g", "jwks_url": "http://x/k"`):                                   "jwks_url is not https",
+		issuer(`"name": "a", "url": "https://u@a.example", "audience": "g"`):                                                           "a user name",
+		issuer(`"name": "a", "url": "https://a.example"`):                                                                              "audience is required",
+		issuer(`"name": "a", "url": "https://a.example", "audience": "g"}, {"name": "a", "url": "https://a.example", "audience": "g"`): "used twice",
+		trust(`"issuer": "no", "claims": {"sub": "x"}`):                                                                                "is not one of the issuers",
+		trust(`"issuer": "gh"`): "claims must pin",
+		trust(`"issuer": "gh", "claims": {"ref": "refs/heads/main"}`):         "claims must pin",
+		trust(`"issuer": "gh", "claims": {"repository": "*/app"}`):            "claims must pin",
+		trust(`"issuer": "gh", "claims": {"sub": "**"}`):                      "claims must pin",
+		trust(`"issuer": "gh", "claims": {"sub": "x", "ref": ""}`):            "empty pattern",
+		trust(`"issuer": "gh", "claims": {"sub": "x"}, "actions": ["admin"]`): "never given admin",
+		trust(`"issuer": "gh", "claims": {"sub": "x"}, "actions": ["fly"]`):   "unknown",
+	} {
+		if _, err := settings.Parse(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", text, err, want)
+		}
+	}
+}

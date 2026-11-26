@@ -16,6 +16,7 @@ import (
 )
 
 // The API of accounts, tokens and the audit log. Who may do what:
+//   - login, password, oidc/token: no token; the password, or the signed token of a trusted issuer, is the credential.
 //   - whoami: any token.
 //   - tokens: a token whose scope has "admin" on every repository ("*") makes tokens for its own account and lists and revokes its own; an admin account does so for any account.
 //   - accounts, the audit log and the settings: an admin account whose token has that scope.
@@ -28,6 +29,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		return
 	case "password":
 		s.changePassword(w, r)
+		return
+	case "oidc/token": // the signature of a trusted issuer is the credential
+		s.exchange(w, r)
 		return
 	}
 	p := s.principal(w, r, fail)

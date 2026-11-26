@@ -64,6 +64,31 @@ Accounts and tokens are **not** in the file: they are made while the program run
 
 A change of an upstream's words is taken at `SIGHUP` with the rest of the file.
 
+## `issuers`
+
+Who is trusted to sign the tokens of CI jobs ([ci-jobs.md](ci-jobs.md)). With none, `POST /api/v1/oidc/token` accepts nothing. Read again on `SIGHUP`.
+
+| Word | Default | Meaning |
+|---|---|---|
+| `name` | **required** | 1 to 63 of `a-z 0-9 . _ -`. A trust names it. Unique. |
+| `url` | **required** | The `iss` of the issuer's tokens, compared to the character (`https://token.actions.githubusercontent.com` has no `/` at the end). `https`; `http` only with `allow_private`. Its discovery document is at `<url>/.well-known/openid-configuration`. Unique. |
+| `audience` | **required** | The `aud` a token must have. Use the address of this godepot, so that a token made for another service is not taken. |
+| `jwks_url` | from the discovery document | The address of the issuer's keys, for an issuer whose discovery document cannot be used. |
+| `allow_private` | `false` | **Dangerous with an address you do not control.** `true`: the keys may be read from a loopback, private or link-local address, and over `http`. |
+
+## `trusts`
+
+Which job may become which robot. A trust is tried in the order of the file; the first whose issuer and `claims` fit is used (the request may name the `account` when several fit).
+
+| Word | Default | Meaning |
+|---|---|---|
+| `issuer` | **required** | The `name` of an issuer. |
+| `account` | **required** | A **robot** account that is not an admin. It must exist and be enabled when the job asks, not when the file is read. Its grants limit the token. |
+| `claims` | **required** | **The lock: read [ci-jobs.md](ci-jobs.md).** An object of claim name and pattern (the same two wildcards as below); **every** one must fit. At least one of `sub`, `repository`, `repository_id`, `repository_owner`, `repository_owner_id`, `project_path`, `project_id`, `namespace_path`, `namespace_id` must be there with a value that does not begin with `*`. A claim that the token lacks, or that is a list or an object, does not fit. |
+| `repositories` | `["*"]` | Patterns of the repositories of the token. |
+| `paths` | every path | Patterns of the paths of the token. |
+| `actions` | `["read", "write"]` | `read`, `write`, `delete`, `promote`. `admin` is refused. |
+
 ## `grants`
 
 A grant gives an account actions on the paths of repositories. A grant on a **group** is what a client of the group needs: it reads everything the group answers with, whichever member has it, and writes to `write_to`; the grants of the members are not asked. It is what the **account** may do; a token has a scope of its own and the request needs both ([access.md](access.md), [api.md](api.md)).

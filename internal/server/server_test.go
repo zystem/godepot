@@ -49,6 +49,7 @@ type rig struct {
 	clock  *atomic.Int64
 	admin  string // the secret of a token of an admin account with every action
 	refuse *metrics.Counter
+	srv    *server.Server
 }
 
 func newRig(t *testing.T) *rig {
@@ -75,7 +76,7 @@ func newRig(t *testing.T) *rig {
 	s.Settings.Store(set)
 	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
-	r := &rig{t: t, ts: ts, db: db, auth: as, layer: layer, store: store, log: logbuf, clock: clock, refuse: refused}
+	r := &rig{t: t, ts: ts, db: db, auth: as, layer: layer, store: store, log: logbuf, clock: clock, refuse: refused, srv: s}
 	ctx := context.Background()
 	for _, a := range []struct {
 		name, kind string

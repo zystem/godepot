@@ -19,6 +19,7 @@ import (
 	"github.com/zystem/godepot/internal/cleanup"
 	"github.com/zystem/godepot/internal/format"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/oidc"
 	"github.com/zystem/godepot/internal/settings"
 	"github.com/zystem/godepot/internal/trash"
 )
@@ -34,6 +35,8 @@ type Server struct {
 	Trash   *trash.Trash
 	// LoginLife is how long a token that a login makes lives when the login does not say (default 12 hours).
 	LoginLife time.Duration
+	// OIDC checks the signed tokens of CI jobs and keeps the keys of their issuers; the zero value is ready.
+	OIDC oidc.Verifier
 
 	fails ipFails
 	// Refused counts the refusals by reason (unauthenticated, forbidden); nil: not counted.

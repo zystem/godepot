@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,6 +202,117 @@ type Rule struct {
 type Settings struct {
 	Repositories []Repo `json:"repositories"`
 	Grants       []Rule `json:"grants"`
+	// Issuers are the issuers of signed tokens that are trusted, and Trusts say which of their tokens may be exchanged for a token of godepot, and for what (docs/spec.md, A3).
+	Issuers []Issuer `json:"issuers,omitempty"`
+	Trusts  []Trust  `json:"trusts,omitempty"`
+}
+
+// Issuer is who signs the tokens of CI jobs: GitHub Actions, GitLab, Kubernetes, anything that publishes its keys as OpenID Connect does.
+type Issuer struct {
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	Audience     string `json:"audience"`
+	JWKSURL      string `json:"jwks_url,omitempty"`
+	AllowPrivate bool   `json:"allow_private,omitempty"`
+}
+
+// Trust lets a token of the issuer whose claims fit become a token of the robot account.
+type Trust struct {
+	Issuer  string            `json:"issuer"`
+	Account string            `json:"account"`
+	Claims  map[string]string `json:"claims"`
+	// Repositories, Paths and Actions narrow the token (default: every repository, every path, read and write). The grants of the account narrow it too.
+	Repositories []string `json:"repositories,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Actions      []string `json:"actions,omitempty"`
+}
+
+// Scope is the scope of the token that the trust gives.
+func (t *Trust) Scope() []auth.Grant {
+	g := auth.Grant{Repositories: t.Repositories, Paths: t.Paths, Actions: t.Actions}
+	if len(g.Repositories) == 0 {
+		g.Repositories = []string{"*"}
+	}
+	if len(g.Actions) == 0 {
+		g.Actions = []string{auth.Read, auth.Write}
+	}
+	return []auth.Grant{g}
+}
+
+// IssuerByURL finds the issuer whose tokens name this address, or nil.
+func (s *Settings) IssuerByURL(address string) *Issuer {
+	for i := range s.Issuers {
+		if s.Issuers[i].URL == address {
+			return &s.Issuers[i]
+		}
+	}
+	return nil
+}
+
+// identifying are the claims that say whose job a token is. A trust must pin one: an issuer such as GitHub signs tokens for everybody's jobs.
+var identifying = []string{"sub", "repository", "repository_id", "repository_owner", "repository_owner_id", "project_path", "project_id", "namespace_path", "namespace_id"}
+
+func (s *Settings) checkTrust(add func(string, ...any)) {
+	names, urls := map[string]bool{}, map[string]bool{}
+	for i, is := range s.Issuers {
+		who := fmt.Sprintf("issuer %d (%q)", i+1, is.Name)
+		if err := auth.CheckName(is.Name); err != nil {
+			add("%s: %v", who, err)
+		}
+		if names[is.Name] {
+			add("%s: the name is used twice", who)
+		}
+		if urls[is.URL] {
+			add("%s: the url is used twice", who)
+		}
+		names[is.Name], urls[is.URL] = true, true
+		for _, a := range []struct{ name, v string }{{"url", is.URL}, {"jwks_url", is.JWKSURL}} {
+			if a.v == "" && a.name == "jwks_url" {
+				continue
+			}
+			p, err := url.Parse(a.v)
+			switch {
+			case err != nil || p.Host == "" || (p.Scheme != "https" && p.Scheme != "http"):
+				add("%s: %s is %q: it must be an address like https://issuer.example.com", who, a.name, a.v)
+			case p.Scheme == "http" && !is.AllowPrivate:
+				add("%s: %s is not https (only an issuer with allow_private may be http)", who, a.name)
+			case p.User != nil || p.RawQuery != "" || p.Fragment != "":
+				add("%s: %s has a user name, a query or a fragment", who, a.name)
+			}
+		}
+		if is.Audience == "" {
+			add("%s: audience is required: without it a token meant for another service would be taken", who)
+		}
+	}
+	for i, t := range s.Trusts {
+		who := fmt.Sprintf("trust %d (account %q)", i+1, t.Account)
+		if !names[t.Issuer] {
+			add("%s: issuer %q is not one of the issuers", who, t.Issuer)
+		}
+		if err := auth.CheckName(t.Account); err != nil {
+			add("%s: %v", who, err)
+		}
+		pinned := false
+		for name, pattern := range t.Claims {
+			if err := auth.CheckPattern(pattern); err != nil {
+				add("%s: claims %q: %v", who, name, err)
+			}
+			if slices.Contains(identifying, name) && !strings.HasPrefix(pattern, "*") {
+				pinned = true
+			}
+		}
+		if !pinned {
+			add("%s: claims must pin who the job is: one of %s, with a value that does not begin with \"*\"", who, strings.Join(identifying, ", "))
+		}
+		if slices.Contains(t.Actions, auth.Admin) {
+			add("%s: actions: a job is never given admin", who)
+		}
+		for _, g := range t.Scope() {
+			if err := g.Check(); err != nil {
+				add("%s: %v", who, err)
+			}
+		}
+	}
 }
 
 // Parse reads and checks the settings. It returns every problem at once.
@@ -323,6 +435,7 @@ func (s *Settings) Check() error {
 			add("%s: %v", who, err)
 		}
 	}
+	s.checkTrust(add)
 	return errors.Join(errs...)
 }
 
