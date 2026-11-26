@@ -2,7 +2,7 @@
 
 How-to. A CI that gives each job a signed OpenID Connect token (GitHub Actions, GitLab, Kubernetes) can have the job exchange that token for a token of godepot that lives **15 minutes**. Nothing secret is kept in the CI. Why it is shaped so: [access.md](access.md); every word of the settings: [settings-file.md](settings-file.md); the call: [api.md](api.md).
 
-What was run is in [Checked](#checked): **no job of a real CI has done this yet.**
+What was run is in [Checked](#checked): of the real CI systems, only GitHub Actions has done it.
 
 ## 1. Make the robot
 
@@ -52,6 +52,8 @@ store: ok
 `SIGHUP` makes a running program read it.
 
 **The conditions are the lock.** GitHub signs tokens for every repository of every user, with any audience a workflow asks for: only `claims` keeps a stranger's job out. Pin the repository (or its owner), and the branch or environment when only that may publish. A pattern `corp/*` lets in every repository of `corp`; `sub: "repo:**"` would let in everybody, and godepot cannot tell.
+
+**Prefer `repository` and `ref` to `sub` for GitHub.** The text of `sub` is not the same everywhere: the run of 2026-11-26 got `repo:<owner>@<owner id>/<repository>@<repository id>:ref:refs/heads/<branch>`, with the numbers, so a pattern `repo:corp/app:*` would not have fitted it. Look at the audit line of a refused try to see what your tokens say.
 
 ## 3. The job
 
@@ -107,7 +109,8 @@ The answer says little on purpose. The audit log (`GET /api/v1/audit?action=oidc
 - 2026-11-26: the two commands above, with the settings file of step 2.
 - 2026-11-26, `tools/test/oidc-run.sh` ([testing.md](testing.md)): the exchange against an issuer whose tokens `openssl` signed, and the keys of GitHub's real issuer read (a token signed by us with a key id of GitHub's is refused for its signature).
 - 2026-11-26, tests with a false issuer (`internal/oidc`, `internal/server/oidc_test.go`), RS256 and ES256.
-- **Not run:** a job of GitHub Actions, GitLab, Kubernetes or Woodpecker; the snippets above.
+- 2026-11-26, **a job of GitHub Actions** (a hosted runner, godepot inside it, a temporary workflow that was removed after): its real token, with `repository` and `ref` as the claims, gave a token for 900 s that published and read back a file under `releases/**` (201), was refused outside it (403); a token the job asked for another audience was refused (401).
+- **Not run:** GitLab, Kubernetes, Woodpecker. The GitHub snippet above as written: the run asked for the token and exchanged it with the same two requests, with its own names and addresses.
 
 ## Limits
 

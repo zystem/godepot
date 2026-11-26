@@ -163,6 +163,13 @@ github    ok       the keys of GitHub's issuer were read (key cc413527-173f-5a05
 
 (The output of 2026-11-26.)
 
+**A real job of GitHub Actions** was run once, on 2026-11-26, by a temporary workflow of this repository with the permission `id-token: write`: rqlite, blobgate and godepot inside the runner, the job's own token exchanged. The workflow was removed after, and its commit was taken out of the history of the branch. Its lines:
+
+```
+exchange: 201, account ci-real, for 900 s
+publish releases/readme: 201 (read back, same bytes); publish other/readme: 403; token for another audience: 401
+```
+
 ## What the variables do
 
 | Variable | Meaning |
