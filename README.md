@@ -72,7 +72,7 @@ database: ok
 store: ok
 ```
 
-Make the tables, the account and a token for it (an account has no password: it gets in with tokens, each with a scope and an end date, [docs/access.md](docs/access.md)):
+Make the tables, the account and a token for it (here the account gets in with a token, which has a scope and an end date; a user may also have a password or come from a directory, [docs/access.md](docs/access.md)):
 
 ```bash
 $G migrate
@@ -158,7 +158,7 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 
 * **blob**: bytes named by their SHA-256, kept once in blobgate however many owners need them.
 * **repository**: a named place of one format, set in the settings file. This release has `hosted` ones (written by you) of the format `raw`.
-* **account**, **token**: who, and what they carry to get in. An account has no password; a token has an owner, a scope and an end date, and is shown once.
+* **account**, **token**: who, and what they carry to get in. An account gets in with tokens (a user also with a password, its own or a directory's); a token has an owner, a scope and an end date, and is shown once.
 * **audit log**: a line, in the log and in the database, for every write, delete, refusal and change of accounts.
 * **reference**: a record that an owner (an asset, an upload in progress) needs a blob. A blob nothing names is garbage after a grace time.
 * **upload**: bytes being taken in; they are held for their owner-to-be until it commits what they are for.
@@ -173,7 +173,7 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 | know what it will be | [docs/spec.md](docs/spec.md), [docs/plan.md](docs/plan.md) (with the traps of other products, and the way round each) |
 | know how bytes are kept, and what a crash leaves | [docs/blob-layer.md](docs/blob-layer.md) |
 | set it up | [docs/configuration.md](docs/configuration.md) (every setting, command and exit code), [docs/settings-file.md](docs/settings-file.md) (repositories and grants) |
-| connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/gomod.md](docs/gomod.md), [docs/pypi.md](docs/pypi.md), [docs/npm.md](docs/npm.md), [docs/maven.md](docs/maven.md) (the formats `go`, `pypi`, `npm`, `maven`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/ci-jobs.md](docs/ci-jobs.md) (publish from CI with no stored secret), [docs/access.md](docs/access.md) (how it works and why) |
+| connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/gomod.md](docs/gomod.md), [docs/pypi.md](docs/pypi.md), [docs/npm.md](docs/npm.md), [docs/maven.md](docs/maven.md) (the formats `go`, `pypi`, `npm`, `maven`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/ci-jobs.md](docs/ci-jobs.md) (publish from CI with no stored secret), [docs/ldap.md](docs/ldap.md) (log in with LDAP or Active Directory), [docs/access.md](docs/access.md) (how it works and why) |
 | watch it | [docs/metrics.md](docs/metrics.md) |
 | change it | [docs/testing.md](docs/testing.md), [docs/status.md](docs/status.md), [docs/README.md](docs/README.md) (the list of pages and their kinds) |
 

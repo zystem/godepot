@@ -53,6 +53,8 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.disable(w, r, p, parts[1], parts[2] == "disable")
 	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "password":
 		s.setPassword(w, r, p, parts[1])
+	case len(parts) == 2 && parts[0] == "ldap" && parts[1] == "ca":
+		s.directoryCA(w, r, p)
 	case len(parts) == 1 && parts[0] == "tokens":
 		s.tokens(w, r, p)
 	case len(parts) == 2 && parts[0] == "tokens" && r.Method == http.MethodDelete:

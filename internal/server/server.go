@@ -18,6 +18,7 @@ import (
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/cleanup"
 	"github.com/zystem/godepot/internal/format"
+	"github.com/zystem/godepot/internal/ldapauth"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/oidc"
 	"github.com/zystem/godepot/internal/settings"
@@ -39,6 +40,7 @@ type Server struct {
 	OIDC oidc.Verifier
 
 	fails ipFails
+	dir   directory
 	// Refused counts the refusals by reason (unauthenticated, forbidden); nil: not counted.
 	Refused *metrics.Counter
 }
@@ -162,11 +164,22 @@ func (s *Server) principal(w http.ResponseWriter, r *http.Request, refuse refuse
 			w.Header().Set("Retry-After", "5")
 			refuse(w, http.StatusTooManyRequests, "too many logins: try again later")
 			return nil
+		case errors.Is(err, ldapauth.ErrUnavailable):
+			directoryDown(w, refuse)
+			return nil
 		case err == nil:
 			return p
 		}
 	} else if ok {
 		p, err = s.Auth.Authenticate(r.Context(), tok)
+		if err == nil {
+			err = s.current(r.Context(), p)
+			if errors.Is(err, ldapauth.ErrUnavailable) {
+				s.directoryFailed(r, p.Account, err)
+				directoryDown(w, refuse)
+				return nil
+			}
+		}
 	} else {
 		err = errors.New("the Authorization header is not understood")
 	}
@@ -182,6 +195,10 @@ func (s *Server) principal(w http.ResponseWriter, r *http.Request, refuse refuse
 		return nil
 	}
 	return p
+}
+
+func (s *Server) directoryFailed(r *http.Request, user string, err error) {
+	s.Audit.Record(r.Context(), audit.Event{Actor: user, Remote: remote(r), Action: "directory", Result: audit.Refused, Detail: clip(err.Error(), 500)})
 }
 
 func (s *Server) count(reason string) {

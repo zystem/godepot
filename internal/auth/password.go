@@ -101,6 +101,9 @@ func (s *Store) SetPassword(ctx context.Context, name, pw string) error {
 	if err != nil {
 		return err
 	}
+	if a.Source != "" {
+		return fmt.Errorf("%w: the password of %s is the directory's: change it there", ErrBadPassword, name)
+	}
 	if a.Kind != "user" {
 		return errors.New("a robot has no password: it gets in with tokens")
 	}
@@ -139,9 +142,10 @@ func acquire() (func(), error) {
 	}
 }
 
-// A password that was checked is remembered for a short time by its SHA-256 (with the account), so that each request of a client that sends it with basic authentication does not cost the rounds. The
-// remembered value is the hash that was matched: a changed password is another hash and is not matched by the memory.
-type memory struct {
+// Memory keeps the checks of passwords that were good lately: a password that was checked is remembered for a short time by its SHA-256 (with the account), so that each request of a client that sends it
+// with basic authentication does not cost the check again. The remembered value is what it was checked against (the hash that was matched, or the address of a directory): a changed password is another
+// hash and is not matched by the memory.
+type Memory struct {
 	mu   sync.Mutex
 	seen map[[32]byte]memo
 }
@@ -151,20 +155,25 @@ type memo struct {
 	until time.Time
 }
 
-var verified = &memory{seen: map[[32]byte]memo{}}
+var verified = &Memory{}
 
 func memoKey(name, pw string) [32]byte { return sha256.Sum256([]byte(name + "\x00" + pw)) }
 
-func (m *memory) ok(name, pw, hash string, now time.Time) bool {
+// OK says whether this name and password were checked lately against the same thing (a hash, or the address of a directory).
+func (m *Memory) OK(name, pw, hash string, now time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, found := m.seen[memoKey(name, pw)]
 	return found && v.hash == hash && now.Before(v.until)
 }
 
-func (m *memory) add(name, pw, hash string, now time.Time) {
+// Add remembers a check that was good.
+func (m *Memory) Add(name, pw, hash string, now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.seen == nil {
+		m.seen = map[[32]byte]memo{}
+	}
 	if len(m.seen) > 10_000 {
 		for k, v := range m.seen {
 			if now.After(v.until) {
@@ -207,7 +216,7 @@ func (s *Store) Login(ctx context.Context, name, pw string) (*Principal, error) 
 		}
 		return nil, s.failed(ctx, name, int(meta.Int(r[4])), fmt.Errorf("%w: the account %s has no password or is disabled", ErrInvalid, name))
 	}
-	good := verified.ok(name, pw, hash, now)
+	good := verified.OK(name, pw, hash, now)
 	if !good {
 		release, err := acquire()
 		if err != nil {
@@ -219,11 +228,11 @@ func (s *Store) Login(ctx context.Context, name, pw string) (*Principal, error) 
 	if !good {
 		return nil, s.failed(ctx, name, int(meta.Int(r[4])), fmt.Errorf("%w: wrong password for %s", ErrInvalid, name))
 	}
-	verified.add(name, pw, hash, now)
+	verified.Add(name, pw, hash, now)
 	if meta.Int(r[4]) > 0 {
 		_, _ = s.DB.Exec(ctx, meta.S(`DELETE FROM login_state WHERE account = ?`, name))
 	}
-	return &Principal{Account: name, Admin: meta.Int(r[0]) != 0, Scope: []Grant{{Repositories: []string{"*"}, Actions: []string{Read, Write, Delete, Promote}}}}, nil
+	return &Principal{Account: name, Admin: meta.Int(r[0]) != 0, Scope: dataScope()}, nil
 }
 
 // failed counts a failed login, and locks the account after LockAfter in a row: for LockFor, and twice as long for each failure after, up to MaxLock.

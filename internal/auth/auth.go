@@ -1,4 +1,4 @@
-// Package auth is who may do what: accounts, tokens and the scope of a token. An account has no password; it gets in with tokens, each of which has an owner, a scope and an end date
+// Package auth is who may do what: accounts, tokens and the scope of a token. An account gets in with tokens (a user also with a password, its own or the directory's), each of which has an owner, a scope and an end date
 // (docs/spec.md, A1, A2). The secret part of a token is shown once, when it is made, and only its SHA-256 is kept.
 package auth
 
@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +74,7 @@ type Account struct {
 	Admin    bool   `json:"admin"`
 	Disabled bool   `json:"disabled"`
 	Created  int64  `json:"created_at"`
+	Source   string `json:"source,omitempty"` // "ldap" for an account of the directory
 }
 
 // CreateAccount makes an account. kind is "user" or "robot".
@@ -96,7 +98,7 @@ func (s *Store) CreateAccount(ctx context.Context, name, kind string, admin bool
 
 // Account reads an account; ErrNoAccount when there is none.
 func (s *Store) Account(ctx context.Context, name string) (*Account, error) {
-	rows, err := s.DB.Query(ctx, meta.S(`SELECT name, kind, admin, disabled, created_at FROM accounts WHERE name = ?`, name))
+	rows, err := s.DB.Query(ctx, meta.S(`SELECT name, kind, admin, disabled, created_at, source FROM accounts WHERE name = ?`, name))
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +109,12 @@ func (s *Store) Account(ctx context.Context, name string) (*Account, error) {
 }
 
 func accountOf(r []any) *Account {
-	return &Account{Name: meta.Str(r[0]), Kind: meta.Str(r[1]), Admin: meta.Int(r[2]) != 0, Disabled: meta.Int(r[3]) != 0, Created: meta.Int(r[4])}
+	return &Account{Name: meta.Str(r[0]), Kind: meta.Str(r[1]), Admin: meta.Int(r[2]) != 0, Disabled: meta.Int(r[3]) != 0, Created: meta.Int(r[4]), Source: meta.Str(r[5])}
 }
 
 // Accounts lists every account by name.
 func (s *Store) Accounts(ctx context.Context) ([]*Account, error) {
-	rows, err := s.DB.Query(ctx, meta.S(`SELECT name, kind, admin, disabled, created_at FROM accounts ORDER BY name`))
+	rows, err := s.DB.Query(ctx, meta.S(`SELECT name, kind, admin, disabled, created_at, source FROM accounts ORDER BY name`))
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +147,18 @@ type Principal struct {
 	Admin   bool
 	Token   string  // the id of the token; "" for an anonymous request
 	Scope   []Grant // what the token allows; a token never allows more than its account has
+	// Directory says that the account is one of the directory; Groups are its groups there, as last asked, at GroupsAt.
+	Directory bool
+	Groups    []string
+	GroupsAt  time.Time
+}
+
+// InGroup says whether the account is in the group of the directory. The names of a directory take no notice of capitals.
+func (p *Principal) InGroup(name string) bool {
+	if p == nil || !p.Directory {
+		return false
+	}
+	return slices.ContainsFunc(p.Groups, func(g string) bool { return strings.EqualFold(g, name) })
 }
 
 // Anonymous says whether the request had no token.
@@ -236,7 +250,7 @@ func (s *Store) Authenticate(ctx context.Context, token string) (*Principal, err
 	if !ok {
 		return nil, fmt.Errorf("%w: not a godepot token", ErrInvalid)
 	}
-	rows, err := s.DB.Query(ctx, meta.S(`SELECT t.digest, t.scope, t.expires_at, t.revoked_at, a.name, a.admin, a.disabled FROM tokens t JOIN accounts a ON a.name = t.account WHERE t.id = ?`, id))
+	rows, err := s.DB.Query(ctx, meta.S(`SELECT t.digest, t.scope, t.expires_at, t.revoked_at, a.name, a.admin, a.disabled, a.source, a.dir_groups, a.dir_at FROM tokens t JOIN accounts a ON a.name = t.account WHERE t.id = ?`, id))
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +274,9 @@ func (s *Store) Authenticate(ctx context.Context, token string) (*Principal, err
 	if err := json.Unmarshal([]byte(meta.Str(r[1])), &scope); err != nil {
 		return nil, fmt.Errorf("%w: token %s has a scope that cannot be read", ErrInvalid, id)
 	}
-	return &Principal{Account: meta.Str(r[4]), Admin: meta.Int(r[5]) != 0, Token: id, Scope: scope}, nil
+	p := &Principal{Account: meta.Str(r[4]), Admin: meta.Int(r[5]) != 0, Token: id, Scope: scope}
+	p.directory(meta.Str(r[7]), meta.Str(r[8]), meta.Int(r[9]))
+	return p, nil
 }
 
 func splitToken(t string) (id, secret string, ok bool) {

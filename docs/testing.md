@@ -170,6 +170,20 @@ exchange: 201, account ci-real, for 900 s
 publish releases/readme: 201 (read back, same bytes); publish other/readme: 403; token for another audience: 401
 ```
 
+## A directory: LDAP and Active Directory
+
+The tests use a false directory of their own (`internal/testutil/directory.go`). `tools/test/ldap-run.sh` runs the program against a **real directory of yours**, given by the variables its head lists; it changes nothing there. With `L_CA_BY_API=1` the certificate is not named in the settings but given through the API (one more line, `trust`). A person it logs in must not be the name of a local account in the stand's database (a local account wins): start a fresh stand after `go test`. It needs the stand, `curl` and `python3`; ports 19290 and 19292.
+
+```
+login     ok       alice logged in at the directory: the grant of <group> lets them write (201), that of <other group> does not apply (403), the admin API is closed (403)
+password  ok       the directory's password works in basic authentication, also with the name in capitals (200); a wrong one is 401
+refresh   ok       after the time of refresh the token still works: the person and the groups were asked again, with no error
+refused   ok       not let in: carol=401 dave=401
+log       ok       neither password, nor the token, is in the log of the program
+```
+
+(The output of 2026-11-27 against Active Directory of Windows Server 2025, the two group names replaced; `carol` is disabled, `dave`'s password has expired. AD LDS passed over LDAPS and StartTLS the same day.)
+
 ## What the variables do
 
 | Variable | Meaning |
