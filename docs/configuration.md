@@ -1,6 +1,6 @@
 # Configuration
 
-Reference. The environment variables and the commands of the program as they are in this release (2026-11-19). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A proxy repository may also read the variables that its `upstream` names in the settings file (`password_env`, `token_env`: [settings-file.md](settings-file.md)); they are read when the repository is first used and again after a `SIGHUP` that changes its upstream. A change of a variable needs a **restart** of the replica; a change of the file needs a restart or a `SIGHUP`.
+Reference. The environment variables and the commands of the program as they are in this release (2026-11-28). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A proxy repository may also read the variables that its `upstream` names in the settings file (`password_env`, `token_env`: [settings-file.md](settings-file.md)); they are read when the repository is first used and again after a `SIGHUP` that changes its upstream. A change of a variable needs a **restart** of the replica; a change of the file needs a restart or a `SIGHUP`.
 
 ## Settings
 
@@ -64,4 +64,4 @@ A wrong value is refused at start with every problem named at once.
 | `GET /readyz` | `{"checks":{"database":"ok"},"status":"ready"}`, or 503 with `"database":"fail"` |
 | `GET /metrics` (on `GODEPOT_METRICS_PORT` only) | [metrics.md](metrics.md) |
 
-The format `raw` is the only one served in this release.
+The formats served are `raw`, `oci`, `go`, `pypi`, `npm` and `maven` ([settings-file.md](settings-file.md)).

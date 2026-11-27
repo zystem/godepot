@@ -1,24 +1,24 @@
 # godepot
 
-**godepot is a repository manager (packages and images for `docker`, `mvn`, `npm`, `pip`, `go`, `apt`) that keeps every byte in [blobgate](https://github.com/zystem/blobgate), once, and frees the disk by itself.**
+**godepot is a repository manager (packages and images for `docker`, `mvn`, `npm`, `pip`, `go`) that keeps every byte in [blobgate](https://github.com/zystem/blobgate), once, and frees the disk by itself.**
 
-> **Status, 2026-11-20: early. Two formats are served: `raw`** (files by path, with `curl`) and **`oci`** (images, Helm charts and any artifact, for `helm`, `oras`, `crane`, `skopeo`, `cosign`: [docs/oci-clients.md](docs/oci-clients.md); `docker` and `podman` were not run), with accounts, tokens and an audit log, and **proxy and group repositories** for both (a copy on demand of Docker Hub or a web server, and one address for what is yours and what is public, with a guard against a public package taking the name of one of yours: [docs/proxy-howto.md](docs/proxy-howto.md)). `npm`, `mvn`, `pip` and the others cannot talk to this release yet: those formats are steps 6 to 9 of the plan. What is built is the hard part that other products get wrong, the layer that keeps bytes by their SHA-256, knows who needs them and collects what nobody needs while the service serves ([docs/blob-layer.md](docs/blob-layer.md)), and the first door on top of it. The specification and the plan are in [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md); [docs/status.md](docs/status.md) says what is built and what was run.
+> **Status, 2026-11-28: early, before 1.0** (settings and tables may still change). **Six formats are served**, each as hosted, proxy and group repositories: `raw` (files by path, with `curl`), `oci` (images, Helm charts and any artifact), `go`, `pypi`, `npm` and `maven`. People and programs get in with tokens, with the password of a local account or of LDAP or Active Directory, and CI jobs with their own signed token (OIDC). Also: cleanup with a trash, cooldown and block lists for proxies, an audit log, metrics. **Not built:** apt, rpm and Helm repositories, promotion and builds, single sign-on of people in a browser, web pages, TLS on its own port, a published image and signed releases. What is built, what was run and what was not: [docs/status.md](docs/status.md); what comes next: [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md).
 
 ## When to use it, and when not
 
-Use it (when it is done) when you need hosted, proxy and group repositories of several formats on storage you do not control or of different kinds (whatever rclone talks to), with more than one replica and no licence that counts components, requests or seats.
+Use it (it is early: try it before you depend on it) when you need hosted, proxy and group repositories of several formats on storage you do not control or of different kinds (whatever rclone talks to), with no licence that counts components, requests or seats.
 
-Do not use it when one format on one disk is enough (a plain registry, or a static directory behind a web server, is less to run), when you need a vulnerability or licence database inside the product (godepot will call a scanner you run), or **today for anything but files served by `curl`, images and charts, and for reading the code**.
+Do not use it when one format on one disk is enough (a plain registry, or a static directory behind a web server, is less to run), when you need a vulnerability or licence database inside the product (godepot will call a scanner you run), when you need a format or a feature of the "Not built" list above, or when you cannot put a reverse proxy with TLS in front of it.
 
 ## The parts
 
 ```
- curl (raw: built)    docker / mvn / npm / pip / go / apt ...  (not built yet)
+ curl    docker / helm    go    pip / twine    npm    mvn
             │
             ▼
  ┌─────────────────────────────────────────────┐
  │ godepot (any number of replicas, stateless)  │
- │  accounts, tokens, audit; format raw         │
+ │  accounts, tokens, audit; the six formats    │
  │  blob layer: bytes by digest, references     │
  │  collector (one replica at a time: a lease)  │
  └──────────┬──────────────────────┬────────────┘
@@ -39,6 +39,7 @@ docker run -d --name blobgate --network host --read-only --tmpfs /data:rw,mode=1
   -e BLOBGATE_RQLITE_URL=http://127.0.0.1:4001 -e BLOBGATE_PORT=18090 -e BLOBGATE_SHIM_PORT=0 \
   -e BLOBGATE_TENANTS=godepot=a-godepot-secret-16-chars -e BLOBGATE_ADMIN_TOKEN=an-admin-token-16-chars \
   -e BLOBGATE_SEAL_KEY=a-seal-key-16-chars-long ghcr.io/zystem/blobgate:0.6.1
+sleep 5
 ```
 
 Make the store godepot will use. It must be set to `dedup: "tenant"` (godepot makes the key of a blob from the bytes of an upload by a link, and the store has to be able to):
@@ -82,9 +83,9 @@ cat token.err
 ```
 
 ```
-the schema of the database is at version 3
+the schema of the database is at version 8
 account ci-build (robot) made
-token a839e93446e7 for ci-build, valid until 2026-11-20T21:56:15Z. This is the only time it is shown; it is not kept.
+token 31b258b6a231 for ci-build, valid until 2026-11-28T23:22:33Z. This is the only time it is shown; it is not kept.
 ```
 
 (`new-account` and `new-token` also write a line of the audit log, as JSON, to the standard error; it is cut here. The token is on the standard output, so it is in `$TOKEN` and not on the screen. The first line is `migrate`'s.)
@@ -107,7 +108,7 @@ curl -s -u x:$TOKEN localhost:18100/repository/files/docs/
 {"path":"docs/hello.txt","sha256":"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03","size":6}
 hello
 hell
-{"items":[{"path":"docs/hello.txt","size":6,"sha256":"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03","content_type":"text/plain","created_at":1795125377}]}
+{"items":[{"path":"docs/hello.txt","size":6,"sha256":"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03","content_type":"text/plain","created_at":1795821759}]}
 ```
 
 A file is immutable (other bytes at the same path are refused, the same bytes are fine), and a request with no token is turned away:
@@ -142,7 +143,7 @@ would remove (dry: nothing was changed, use -fix) 0 keys that nothing names
 
 Two blobs, not one: the bytes of the refused write (`bye`) were taken in and are kept until the grace time (24 hours) has passed, in case a client was about to name them; then the collector removes them.
 
-Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown. The outputs are the ones that run printed, except the lines said above to be cut, and the token, which is different every time (the first 20 characters were `gd_a839e93446e7_bY9t`); the `created_at` and the end date are those of that run. Not run by a test: a test that runs this page is still to do. Remove it all with `docker rm -f godepot blobgate bg-rq gd-rq`.
+Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown. The outputs are the ones that run printed, except the lines said above to be cut, and the token and its id, which are different every time; the `created_at` and the end date are those of that run. Not run by a test: a test that runs this page is still to do. Remove it all with `docker rm -f godepot blobgate bg-rq gd-rq`.
 
 **Next:** [docs/proxy-howto.md](docs/proxy-howto.md) (a proxy of Docker Hub and a group), [docs/oci-clients.md](docs/oci-clients.md) (the same account and token push images and charts), [docs/raw.md](docs/raw.md) (every request of the format), [docs/access.md](docs/access.md) (accounts, scopes: why it is so), [docs/api.md](docs/api.md) (the API, the audit log).
 
@@ -152,12 +153,12 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 |---|---|---|
 | `docker build .` | tests, the try-it | a static program in an image with no shell, user 65532, a read-only root; nothing is written to a disk |
 | `go build ./cmd/godepot` (Go 1.26) | a workstation, changes | |
-| an image on a registry, a chart, signed releases | production | **not built yet**; the release process is a step of the plan |
+| an image on a registry, a chart, signed releases | production | **not built yet**: a release is a tag and its notes; build it yourself from the tag |
 
 ## Words
 
 * **blob**: bytes named by their SHA-256, kept once in blobgate however many owners need them.
-* **repository**: a named place of one format, set in the settings file. This release has `hosted` ones (written by you) of the format `raw`.
+* **repository**: a named place of one format, set in the settings file. It is `hosted` (written by you), a `proxy` (a copy of an upstream, made on demand) or a `group` (several read as one), and has one format.
 * **account**, **token**: who, and what they carry to get in. An account gets in with tokens (a user also with a password, its own or a directory's); a token has an owner, a scope and an end date, and is shown once.
 * **audit log**: a line, in the log and in the database, for every write, delete, refusal and change of accounts.
 * **reference**: a record that an owner (an asset, an upload in progress) needs a blob. A blob nothing names is garbage after a grace time.
@@ -179,4 +180,4 @@ Run on 2026-11-19 with the image of this repository and blobgate 0.6.1, as shown
 
 ## Not there yet
 
-The things a project of this kind needs and that this one does not have: a contributing guide, a security policy, signed releases, the OpenSSF badge, a changelog. They are steps of the plan ([docs/plan.md](docs/plan.md)), to be done before the first release, not after.
+The things a project of this kind needs and that this one does not have: a contributing guide, a security policy, signed releases, the OpenSSF badge, a changelog, a troubleshooting page, a production checklist. The plan ([docs/plan.md](docs/plan.md)) meant them from the first release; the releases so far are pre-releases without them.

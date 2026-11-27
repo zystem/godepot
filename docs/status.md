@@ -1,4 +1,4 @@
-# Status (2026-11-27)
+# Status (2026-11-28)
 
 Record. What is built, what was run, what is not. Dates are absolute; "not run" means it was not run.
 
@@ -35,7 +35,7 @@ A 10 GiB object, 50 to 500 slow readers, 200 000 small objects and `kill -9` of 
 ## Not built
 
 - **Of step 5:** removing from a proxy's cache and a size limit for it (cleanup is step 7: the cache only grows until then); `merge: true` of a group; the referrers of an upstream; joining fetches across replicas (each replica fetches once); a claim for a name published before step 5 (list its prefix in `claims`); credentials sealed in the database (they are environment variables the file names); an upstream through an HTTP proxy.
-- **Every format but `raw`, `oci`, `go`, `pypi`, `npm` and `maven`**, policies, OIDC and LDAP, promotion, the web pages: steps 6 to 12 of the plan. Accounts have no passwords (tokens only) until step 8.
+- **Formats** other than `raw`, `oci`, `go`, `pypi`, `npm` and `maven`; promotion and builds; single sign-on of people; the token flow of `docker login`; the web pages: steps 7 to 12 of the plan.
 - Parts in the layer itself: the OCI door takes the parts in as blobs and writes the layer once more at the end ([oci.md](oci.md)).
 - TLS on the port of the program.
 - CI has run on GitHub (pull request 3, 2026-11-18: `test`, `analysis`, `reproducible` and `image` passed). The release workflow, the chart, signed releases, the supply-chain gates (Scorecard, dependency review, fuzzing), the security documents, `CONTRIBUTING`, the changelog and the OpenSSF badge are not there.
