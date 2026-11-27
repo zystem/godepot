@@ -4,8 +4,12 @@ All notable changes. The form is that of [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-28
+
+The first release with files. The program is that of 0.7.0.
+
 ### Added
-* A release workflow: from the next tag a release has an image, binaries, a bill of materials, signatures and build provenance ([docs/verifying-releases.md](docs/verifying-releases.md)).
+* An image (`ghcr.io/zystem/godepot`), binaries for linux/amd64 and linux/arm64, checksums, a bill of materials, signatures and build provenance, made by the release workflow ([docs/verifying-releases.md](docs/verifying-releases.md)).
 
 ## [0.7.0] - 2026-11-28
 
