@@ -3,6 +3,7 @@ package server_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,6 +55,15 @@ func TestPasswords(t *testing.T) {
 	r.want(204, "PUT", "/api/v1/accounts/"+root+"/password", r.admin, `{"password": "root has a password!"}`)
 	if code, _, _ := r.basic("GET", "/api/v1/accounts", root, "root has a password!", ""); code != 403 {
 		t.Fatalf("an admin account's password does not open the admin API: %d", code)
+	}
+	// Nor does a login: the action admin is not given for a password, to an admin account or to anyone.
+	for _, who := range [][2]string{{root, "root has a password!"}, {"reader", "reader has a password"}} {
+		for _, actions := range []string{`["admin"]`, `["read","admin"]`} {
+			_, b := r.want(400, "POST", "/api/v1/login", "", fmt.Sprintf(`{"account": %q, "password": %q, "repositories": ["*"], "actions": %s}`, who[0], who[1], actions))
+			if strings.Contains(string(b), "gd_") {
+				t.Fatalf("a password gave a token with admin: %s", b)
+			}
+		}
 	}
 	// A wrong password is 401, with the same words whoever is asked about; a token in the password place still works with any name.
 	for _, c := range [][2]string{{"reader", "not the password at all"}, {"nobody", "not the password at all"}} {

@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	p, err := s.password(r, body.Account, body.Password)
 	if err != nil {
 		s.loginRefused(w, err)
+		return
+	}
+	// A password never gives admin: a token with it opens the admin API for an admin account, and makes tokens of 90 days for any other.
+	if slices.Contains(body.Actions, auth.Admin) {
+		fail(w, http.StatusBadRequest, "a password does not give the action admin: an admin makes such a token")
 		return
 	}
 	life := time.Duration(body.LifeSeconds) * time.Second
