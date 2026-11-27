@@ -1,0 +1,116 @@
+name: release
+# A tag vX.Y.Z (or vX.Y.Z-rc.1) tests the tagged commit, then publishes: the image (ghcr.io/<owner>/godepot, linux/amd64 and linux/arm64, with provenance and an SBOM) and a GitHub release with the program
+# for linux/amd64 and linux/arm64, its checksums and the bill of materials. Everything is signed keyless with the identity of this workflow (cosign, recorded in the public Sigstore log) and has a build
+# provenance attestation; there is no private key of the project. docs/release.md says how to cut one, docs/verifying-releases.md how to check it.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # the release
+      packages: write        # the image
+      id-token: write        # the keyless signature and the attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: the version, and the notes (before anything is published)
+        id: v
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          ver="${tag#v}"
+          [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "not a version: $tag"; exit 1; }
+          # a suffix, or a version before 1.0, is a pre-release
+          pre=false; [[ "$ver" == *-* || "$ver" == 0.* ]] && pre=true
+          { echo "tag=$tag"; echo "ver=$ver"; echo "owner=${GITHUB_REPOSITORY_OWNER,,}"; echo "pre=$pre"; } >> "$GITHUB_OUTPUT"
+          tools/release/notes.sh "$ver" > "$RUNNER_TEMP/notes.md"
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: the image
+        id: image
+        env:
+          VER: ${{ steps.v.outputs.ver }}
+          OWNER: ${{ steps.v.outputs.owner }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${OWNER}/godepot"
+          tags=(-t "$image:$VER")
+          # X.Y for a version with no suffix; latest from 1.0 on
+          if [[ "$VER" != *-* ]]; then
+            tags+=(-t "$image:${VER%.*}")
+            if [[ "$VER" != 0.* ]]; then tags+=(-t "$image:latest"); fi
+          fi
+          docker buildx create --use --driver docker-container >/dev/null
+          docker buildx build --platform linux/amd64,linux/arm64 --push --provenance=mode=max --sbom=true --metadata-file "$RUNNER_TEMP/meta.json" \
+            --build-arg "VERSION=$VER" --build-arg "REVISION=$GITHUB_SHA" "${tags[@]}" .
+          digest=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$RUNNER_TEMP/meta.json")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          cosign sign --yes "$image@$digest"
+      - name: provenance of the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ steps.v.outputs.owner }}/godepot
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: the program and its checksums
+        env:
+          VER: ${{ steps.v.outputs.ver }}
+        run: tools/release/package.sh "$VER" dist
+      - name: SBOM
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/godepot.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: sign the files
+        run: |
+          set -euo pipefail
+          for f in dist/*.tar.gz dist/checksums.txt dist/godepot.spdx.json; do
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+      - name: provenance of the files
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VER: ${{ steps.v.outputs.ver }}
+          OWNER: ${{ steps.v.outputs.owner }}
+          PRE: ${{ steps.v.outputs.pre }}
+        run: |
+          set -euo pipefail
+          {
+            cat "$RUNNER_TEMP/notes.md"
+            echo
+            echo "Image: \`ghcr.io/${OWNER}/godepot:${VER}\` (linux/amd64, linux/arm64)"
+            echo "Signatures, provenance and how to check them: https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/verifying-releases.md"
+          } > "$RUNNER_TEMP/release.md"
+          flags=(); [ "$PRE" = true ] && flags+=(--prerelease)
+          gh release create "$TAG" dist/*.tar.gz dist/checksums.txt dist/godepot.spdx.json dist/*.sigstore.json --title "godepot $VER" --notes-file "$RUNNER_TEMP/release.md" "${flags[@]}" --verify-tag

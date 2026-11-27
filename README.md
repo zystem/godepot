@@ -2,7 +2,7 @@
 
 **godepot is a repository manager (packages and images for `docker`, `mvn`, `npm`, `pip`, `go`) that keeps every byte in [blobgate](https://github.com/zystem/blobgate), once, and frees the disk by itself.**
 
-> **Status, 2026-11-28: early, before 1.0** (settings and tables may still change). **Six formats are served**, each as hosted, proxy and group repositories: `raw` (files by path, with `curl`), `oci` (images, Helm charts and any artifact), `go`, `pypi`, `npm` and `maven`. People and programs get in with tokens, with the password of a local account or of LDAP or Active Directory, and CI jobs with their own signed token (OIDC). Also: cleanup with a trash, cooldown and block lists for proxies, an audit log, metrics. **Not built:** apt, rpm and Helm repositories, promotion and builds, single sign-on of people in a browser, web pages, TLS on its own port, a published image and signed releases. What is built, what was run and what was not: [docs/status.md](docs/status.md); what comes next: [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md).
+> **Status, 2026-11-28: early, before 1.0** (settings and tables may still change). **Six formats are served**, each as hosted, proxy and group repositories: `raw` (files by path, with `curl`), `oci` (images, Helm charts and any artifact), `go`, `pypi`, `npm` and `maven`. People and programs get in with tokens, with the password of a local account or of LDAP or Active Directory, and CI jobs with their own signed token (OIDC). Also: cleanup with a trash, cooldown and block lists for proxies, an audit log, metrics. **Not built:** apt, rpm and Helm repositories, promotion and builds, single sign-on of people in a browser, web pages, TLS on its own port, a published image and signed releases (the workflow that makes them is there and has not run). What is built, what was run and what was not: [docs/status.md](docs/status.md); what comes next: [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md).
 
 ## When to use it, and when not
 
@@ -153,7 +153,8 @@ Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown
 |---|---|---|
 | `docker build .` | tests, the try-it | a static program in an image with no shell, user 65532, a read-only root; nothing is written to a disk |
 | `go build ./cmd/godepot` (Go 1.26) | a workstation, changes | |
-| an image on a registry, a chart, signed releases | production | **not built yet**: a release is a tag and its notes; build it yourself from the tag |
+| an image on `ghcr.io`, binaries, signatures ([docs/verifying-releases.md](docs/verifying-releases.md)) | production | **from the release after 0.7.0**; until then build it yourself from the tag |
+| a chart | production | **not built yet** |
 
 ## Words
 
@@ -176,8 +177,8 @@ Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown
 | set it up | [docs/configuration.md](docs/configuration.md) (every setting, command and exit code), [docs/settings-file.md](docs/settings-file.md) (repositories and grants) |
 | connect | [docs/proxy-howto.md](docs/proxy-howto.md) (Docker Hub and your own images behind one address), [docs/oci-clients.md](docs/oci-clients.md) (`helm`, `oras`, `crane`, `skopeo`, `cosign` against the format `oci`), [docs/oci.md](docs/oci.md) (every request of it), [docs/raw.md](docs/raw.md) (the format `raw`), [docs/gomod.md](docs/gomod.md), [docs/pypi.md](docs/pypi.md), [docs/npm.md](docs/npm.md), [docs/maven.md](docs/maven.md) (the formats `go`, `pypi`, `npm`, `maven`), [docs/api.md](docs/api.md) (tokens, the API, the audit log), [docs/ci-jobs.md](docs/ci-jobs.md) (publish from CI with no stored secret), [docs/ldap.md](docs/ldap.md) (log in with LDAP or Active Directory), [docs/access.md](docs/access.md) (how it works and why) |
 | watch it | [docs/metrics.md](docs/metrics.md) |
-| change it | [docs/testing.md](docs/testing.md), [docs/status.md](docs/status.md), [docs/README.md](docs/README.md) (the list of pages and their kinds) |
+| change it | [CHANGELOG.md](CHANGELOG.md), [docs/release.md](docs/release.md), [docs/testing.md](docs/testing.md), [docs/status.md](docs/status.md), [docs/README.md](docs/README.md) (the list of pages and their kinds) |
 
 ## Not there yet
 
-The things a project of this kind needs and that this one does not have: a contributing guide, a security policy, signed releases, the OpenSSF badge, a changelog, a troubleshooting page, a production checklist. The plan ([docs/plan.md](docs/plan.md)) meant them from the first release; the releases so far are pre-releases without them.
+The things a project of this kind needs and that this one does not have: a contributing guide, a security policy, signed tags, a chart, the OpenSSF badge, a troubleshooting page, a production checklist. The plan ([docs/plan.md](docs/plan.md)) meant them from the first release; the releases so far are pre-releases without them.

@@ -19,6 +19,8 @@ Each page is of one kind: **tutorial** (one path that works), **how-to** (one ta
 | [access.md](access.md) | explanation | accounts, tokens, grants |
 | [blob-layer.md](blob-layer.md) | explanation | how bytes are kept, and what a crash leaves |
 | [testing.md](testing.md) | how-to | run the tests and the real clients |
+| [release.md](release.md) | how-to | cut a release |
+| [verifying-releases.md](verifying-releases.md) | how-to | check what a release published |
 | [status.md](status.md) | record | what is built, what was run, what is not |
 | [spec.md](spec.md), [plan.md](plan.md) | record | what it will be, and in which steps |
 | [step0-probes.md](step0-probes.md) | record | the first probes of blobgate |
