@@ -13,12 +13,15 @@ Explanation. Who may do what, how a request is checked, and the reasons. The cal
 
 A **CI job** may get in with no stored secret: the signed token that its CI gives it is exchanged for a token of a robot that lives 15 minutes ([ci-jobs.md](ci-jobs.md)).
 
-Single sign-on of people (OIDC in a browser) and LDAP are not here yet (step 8 of the plan, the next parts). A user logs in with a password or a token that an admin made.
+People may log in with the name and password of a **directory** (LDAP, Active Directory) and get rights by their groups ([ldap.md](ldap.md)).
+
+Single sign-on of people (OIDC in a browser) is not here yet (step 8 of the plan, the next parts).
 
 ## Why it is shaped so
 
+- **A directory answers "who", godepot keeps "what".** The password is never kept; an account and the person's groups are. Tokens work the same for every kind of account, so godepot asks the directory again while they are used: otherwise a person who has left would keep a token for up to 90 days. A local account is never taken over by a directory name, so whoever runs the directory does not run godepot.
 - **A job's token is exchanged, not accepted everywhere.** Every format and call then sees one kind of credential, with an owner, a scope, an end and a line in the audit log. The settings say who is trusted, the account says the most it may do, and the trust narrows it; a job is never an admin, and never a user.
-- **Passwords came after tokens, and give tokens.** Tokens with an end date, a scope and an owner are what every client can send (`curl -u`, `pip`, Maven, `apt`), so they came first. A password is for a person at a terminal (`npm login`, `docker login`, `POST /api/v1/login`): it is checked with a hash that costs time, locks the account after five failures, tells nothing about which names exist, and **never opens the admin API**, so a password that leaks gives the data actions of the account and not the control of the program. A script uses a token.
+- **Passwords came after tokens, and give tokens.** Tokens with an end date, a scope and an owner are what every client can send (`curl -u`, `pip`, Maven, `apt`), so they came first. A password is for a person at a terminal (`npm login`, `docker login`, `POST /api/v1/login`): it is checked with a hash that costs time, locks the account after five failures, answers a wrong password and an unknown name alike (until the lock, [api.md](api.md)), and **never opens the admin API**, so a password that leaks gives the data actions of the account and not the control of the program. A script uses a token.
 - **The account and the token must both allow.** The settings file says what an account may do; a token can only narrow it. Making a token is then safe to let a user do for oneself, and a token in a CI job can be narrow without a second place to keep rules.
 - **A token always ends.** Tokens that never end, shared by a team and pasted into CI settings, are a trap of other products ([plan.md](plan.md), T31).
 - **The secret is in the header and nowhere else.** An address is logged by every proxy; a header is not ([plan.md](plan.md), T32).

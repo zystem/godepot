@@ -47,12 +47,15 @@ All of `/api/v1/` needs a token (`401` without), except `login`, `password` and 
 | `DELETE /api/v1/trash/<id>` | admin | empty the item now: its bytes are let go and are collected after the grace time. `204` |
 | `GET /api/v1/audit` (`?action=`, `?actor=`, `?limit=` up to 1000, `?before=<id>`) | admin | the audit log, newest first; `next` is the id to pass as `before` for the next page |
 | `GET /api/v1/repositories` | admin | the settings file as the program has it |
+| `PUT /api/v1/ldap/ca` (the body is PEM text, not JSON) | admin | trust these certificates for the directory, in place of those given before: a `ca.crt`, or a self-signed `server.crt`; the name is not checked when the server shows exactly one of them ([ldap.md](ldap.md)). `200` with `{"certificates": [{"subject", "issuer", "sha256", "not_before", "not_after"}]}`. `400` for anything but certificates (a private key above all), an ended one, or more than 64 KiB |
+| `GET /api/v1/ldap/ca` | admin | `{"certificates": [...], "pem", "set_by", "set_at"}`; only `{"certificates": []}` when none was given |
+| `DELETE /api/v1/ldap/ca` | admin | forget them, `204` |
 
 "Admin" means an admin account **and** a token whose scope has the action `admin` on repository `*`.
 
 ## The audit log
 
-One line in the log (JSON on the standard error, message `audit`) and one row in the database for every **write, delete, refusal** (`401` and `403` included, with the account and the token id when there were any), **account and token change**, and each **`new-account` and `new-token`** (actor `cli`). The fields: `actor`, `token`, `remote` (the address the connection came from; a reverse proxy's `X-Forwarded-For` is **not** trusted), `action`, `repo`, `path`, `result` (`ok`, `refused`), `detail` (why, or the digest and size).
+One line in the log (JSON on the standard error, message `audit`) and one row in the database for every **write, delete, refusal** (`401` and `403` included, with the account and the token id when there were any), **account and token change**, each change of the directory's trusted certificates (action `ldap.ca.set`, with their SHA-256), and each **`new-account` and `new-token`** (actor `cli`). The fields: `actor`, `token`, `remote` (the address the connection came from; a reverse proxy's `X-Forwarded-For` is **not** trusted), `action`, `repo`, `path`, `result` (`ok`, `refused`), `detail` (why, or the digest and size).
 
 - The row of a write or a delete is written **in the same transaction** as the change. The row of a refusal, of an account and of a token is written after the thing it describes, by itself.
 - Reads are not audited (they are counted: [metrics.md](metrics.md)).
@@ -68,6 +71,7 @@ A **user** account may have a password ([access.md](access.md)). It is the passw
 
 - **A password is stored** as PBKDF2-HMAC-SHA256 with a salt of its own and 600 000 rounds (`pbkdf2-sha256$600000$<salt>$<key>`); the rounds are in the string, so the number can rise later without breaking old passwords. A password is checked at most 4 at a time (the rounds are the heavy part); a login that finds them all busy is `429`. A password that was checked is remembered for 5 minutes by its SHA-256, so a client that sends it with every request does not cost the rounds each time; a changed password is another hash and is not matched by the memory.
 - **Five failed logins in a row lock the account** for a minute; each failure after that doubles the lock, up to 15 minutes. A locked account is refused even with the right password (`429`, `Retry-After`); its tokens are not touched. The count is in the database, so every replica has it. A success, or a new password, resets it. 30 failures from one address in a minute turn that address away (`429`) before the rounds are spent.
-- **What the client is told is the same** for a wrong password, an account that does not exist, a disabled one and one with no password, and the time they take is the same: nothing says which names exist. The audit log has the reason (`login`, result `refused`).
+- **What the client is told is the same** for a wrong password, an account that does not exist, a disabled one and one with no password, and the time they take is the same. **One thing does tell:** only a name that exists is locked, so a `429` after five wrong passwords says that it exists. The audit log has the reason (`login`, result `refused`).
+- **With a directory** ([ldap.md](ldap.md)) the same calls take its names and passwords; a local account of the same name wins. `PUT .../password` and `POST /api/v1/password` are `400` for an account of the directory. A call that needs the directory when it cannot be asked is `503` with `Retry-After`, and the audit action `directory` says why. (The time of an answer differs between a local account, a name of the directory and an unknown one.)
 - **A password is in no log**: not in the audit log, not in the log of the program (a test greps both for the passwords it used).
-- The audit actions are `login` (a token made, or a refusal), `password.set`, `password.change` and `password.clear`.
+- The audit actions are `login` (a token made, or a refusal), `password.set`, `password.change`, `password.clear` and `directory` (the directory could not be asked).

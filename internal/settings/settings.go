@@ -192,9 +192,10 @@ func (r *Repo) Overwrites(path string) bool {
 	return false
 }
 
-// Rule gives an account a grant.
+// Rule gives an account, or the people of a group of the directory, a grant: one of Account and Group.
 type Rule struct {
-	Account string `json:"account"`
+	Account string `json:"account,omitempty"`
+	Group   string `json:"group,omitempty"`
 	auth.Grant
 }
 
@@ -205,6 +206,77 @@ type Settings struct {
 	// Issuers are the issuers of signed tokens that are trusted, and Trusts say which of their tokens may be exchanged for a token of godepot, and for what (docs/spec.md, A3).
 	Issuers []Issuer `json:"issuers,omitempty"`
 	Trusts  []Trust  `json:"trusts,omitempty"`
+	// LDAP is the directory that people log in with (docs/spec.md, A1, A4). Default none.
+	LDAP *LDAP `json:"ldap,omitempty"`
+}
+
+// LDAP is where the directory is and how people and groups are found in it.
+type LDAP struct {
+	URL         string    `json:"url"`
+	StartTLS    bool      `json:"start_tls,omitempty"`
+	CAFile      string    `json:"ca_file,omitempty"`
+	ServerName  string    `json:"server_name,omitempty"`
+	BindDN      string    `json:"bind_dn"`
+	PasswordEnv string    `json:"password_env"`
+	UserBase    string    `json:"user_base"`
+	UserFilter  string    `json:"user_filter"`
+	GroupBase   string    `json:"group_base,omitempty"`
+	GroupFilter string    `json:"group_filter,omitempty"`
+	GroupName   string    `json:"group_name,omitempty"`
+	Refresh     *Duration `json:"refresh,omitempty"`
+}
+
+// Defaults of the directory.
+const (
+	DefaultGroupFilter = "(member={dn})"
+	DefaultGroupName   = "cn"
+	DefaultRefresh     = 5 * time.Minute
+)
+
+// RefreshEvery is how long what the directory said of a person is trusted.
+func (l *LDAP) RefreshEvery() time.Duration {
+	if l.Refresh == nil {
+		return DefaultRefresh
+	}
+	return time.Duration(*l.Refresh)
+}
+
+func (s *Settings) checkLDAP(add func(string, ...any)) {
+	l := s.LDAP
+	if l == nil {
+		return
+	}
+	p, err := url.Parse(l.URL)
+	switch {
+	case err != nil || p.Host == "" || (p.Scheme != "ldaps" && p.Scheme != "ldap"):
+		add("ldap: url is %q: it must be an address like ldaps://dc.example.com:636", l.URL)
+	case p.Scheme == "ldap" && !l.StartTLS:
+		add("ldap: url is ldap and start_tls is not set: a password is never sent in the clear")
+	case p.Scheme == "ldaps" && l.StartTLS:
+		add("ldap: start_tls is for an ldap url; ldaps is encrypted from the start")
+	case p.User != nil || p.RawQuery != "" || strings.Trim(p.Path, "/") != "":
+		add("ldap: url has a user name, a path or a query")
+	}
+	for _, f := range []struct{ name, v string }{{"bind_dn", l.BindDN}, {"user_base", l.UserBase}, {"user_filter", l.UserFilter}} {
+		if f.v == "" {
+			add("ldap: %s is required", f.name)
+		}
+	}
+	if !envNameRE.MatchString(l.PasswordEnv) {
+		add("ldap: password_env is required: the name of the environment variable that holds the password of bind_dn")
+	}
+	if l.UserFilter != "" && !strings.Contains(l.UserFilter, "{user}") {
+		add("ldap: user_filter has no {user}: it would find the same entry for every name")
+	}
+	if l.GroupFilter != "" && !strings.Contains(l.GroupFilter, "{dn}") && !strings.Contains(l.GroupFilter, "{user}") {
+		add("ldap: group_filter has neither {dn} nor {user}: everybody would be in the same groups")
+	}
+	if l.GroupBase == "" && (l.GroupFilter != "" || l.GroupName != "") {
+		add("ldap: group_filter and group_name need group_base")
+	}
+	if l.Refresh != nil && time.Duration(*l.Refresh) <= 0 {
+		add("ldap: refresh must be more than 0")
+	}
 }
 
 // Issuer is who signs the tokens of CI jobs: GitHub Actions, GitLab, Kubernetes, anything that publishes its keys as OpenID Connect does.
@@ -428,14 +500,26 @@ func (s *Settings) Check() error {
 	}
 	for i, g := range s.Grants {
 		who := fmt.Sprintf("grant %d (account %q)", i+1, g.Account)
-		if err := auth.CheckName(g.Account); err != nil {
-			add("%s: %v", who, err)
+		switch {
+		case g.Group != "":
+			who = fmt.Sprintf("grant %d (group %q)", i+1, g.Group)
+			if g.Account != "" {
+				add("%s: a grant is for an account or for a group, not both", who)
+			}
+			if s.LDAP == nil || s.LDAP.GroupBase == "" {
+				add("%s: groups need ldap with a group_base", who)
+			}
+		default:
+			if err := auth.CheckName(g.Account); err != nil {
+				add("%s: %v", who, err)
+			}
 		}
 		if err := g.Grant.Check(); err != nil {
 			add("%s: %v", who, err)
 		}
 	}
 	s.checkTrust(add)
+	s.checkLDAP(add)
 	return errors.Join(errs...)
 }
 
@@ -657,7 +741,7 @@ func (s *Settings) Allows(p *auth.Principal, repo, path, action string) bool {
 		return true
 	}
 	for _, g := range s.Grants {
-		if g.Account == p.Account && g.Grant.Allows(repo, path, action) {
+		if ((g.Account != "" && g.Account == p.Account) || (g.Group != "" && p.InGroup(g.Group))) && g.Grant.Allows(repo, path, action) {
 			return true
 		}
 	}

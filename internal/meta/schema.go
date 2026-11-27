@@ -236,6 +236,20 @@ var steps = [][]string{
 			locked_until INTEGER NOT NULL
 		) WITHOUT ROWID`,
 	},
+	// 8: accounts of a directory (docs/spec.md, A1, A4). source is "" for an account of godepot's own and "ldap" for one that a login at the directory made; dir_groups (a JSON list) is what the directory last
+	// said of its groups, and dir_at when it said it.
+	8: {
+		`ALTER TABLE accounts ADD COLUMN source TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE accounts ADD COLUMN dir_groups TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE accounts ADD COLUMN dir_at INTEGER NOT NULL DEFAULT 0`,
+		// The certificates an admin gave to be trusted for the directory (one row or none). They are public: no secret is kept here.
+		`CREATE TABLE ldap_ca (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			pem TEXT NOT NULL,
+			set_by TEXT NOT NULL,
+			set_at INTEGER NOT NULL
+		)`,
+	},
 }
 
 // Version is the number of the schema this program writes.

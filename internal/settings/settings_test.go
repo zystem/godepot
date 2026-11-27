@@ -3,6 +3,7 @@ package settings_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/settings"
@@ -184,6 +185,42 @@ func TestIssuersAndTrusts(t *testing.T) {
 	} {
 		if _, err := settings.Parse(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", text, err, want)
+		}
+	}
+}
+
+func TestTheDirectoryAndItsGroups(t *testing.T) {
+	text := func(ldap, grants string) string {
+		return `{"repositories": [], "grants": [` + grants + `], "ldap": {` + ldap + `}}`
+	}
+	good := `"url": "ldaps://dc.test", "bind_dn": "cn=svc", "password_env": "P", "user_base": "dc=test", "user_filter": "(uid={user})"`
+	s, err := settings.Parse(strings.NewReader(text(good+`, "group_base": "dc=test"`, `{"group": "Domain Devs", "repositories": ["*"], "actions": ["read"]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LDAP.RefreshEvery() != 5*time.Minute {
+		t.Fatal(s.LDAP.RefreshEvery())
+	}
+	if _, err := settings.Parse(strings.NewReader(text(`"url": "ldap://dc.test", "start_tls": true, "bind_dn": "a", "password_env": "P", "user_base": "b", "user_filter": "{user}"`, ""))); err != nil {
+		t.Fatal(err)
+	}
+	for in, want := range map[string]string{
+		text(strings.Replace(good, "ldaps:", "http:", 1), ""):                                                          "must be an address",
+		text(strings.Replace(good, "ldaps:", "ldap:", 1), ""):                                                          "never sent in the clear",
+		text(good+`, "start_tls": true`, ""):                                                                           "start_tls is for an ldap url",
+		text(strings.Replace(good, "dc.test", "u@dc.test", 1), ""):                                                     "a user name",
+		text(`"url": "ldaps://dc.test"`, ""):                                                                           "bind_dn is required",
+		text(strings.Replace(good, `"P"`, `"a b"`, 1), ""):                                                             "password_env is required",
+		text(strings.Replace(good, "{user}", "bob", 1), ""):                                                            "no {user}",
+		text(good+`, "group_base": "x", "group_filter": "(cn=all)"`, ""):                                               "neither {dn} nor {user}",
+		text(good+`, "group_name": "cn"`, ""):                                                                          "need group_base",
+		text(good+`, "refresh": "0s"`, ""):                                                                             "more than 0",
+		text(good, `{"group": "g", "repositories": ["*"], "actions": ["read"]}`):                                       "groups need ldap",
+		text(good+`, "group_base": "x"`, `{"group": "g", "account": "a", "repositories": ["*"], "actions": ["read"]}`): "not both",
+		text(good, `{"repositories": ["*"], "actions": ["read"]}`):                                                     "name",
+	} {
+		if _, err := settings.Parse(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", in, err, want)
 		}
 	}
 }

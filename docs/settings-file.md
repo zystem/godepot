@@ -89,13 +89,33 @@ Which job may become which robot. A trust is tried in the order of the file; the
 | `paths` | every path | Patterns of the paths of the token. |
 | `actions` | `["read", "write"]` | `read`, `write`, `delete`, `promote`. `admin` is refused. |
 
+## `ldap`
+
+The directory people log in with ([ldap.md](ldap.md)). With none, only local accounts have passwords. Read again on `SIGHUP`; the environment variable is read at each use.
+
+| Word | Default | Meaning |
+|---|---|---|
+| `url` | **required** | `ldaps://host:636`, or `ldap://host:389` with `start_tls`. No path, no user name. |
+| `start_tls` | `false` | Encrypt an `ldap` connection with StartTLS before anything is sent. **Required for `ldap`**, refused for `ldaps`. |
+| `ca_file` | the system's | A PEM file with certificates to trust: an authority's, or a self-signed server's own. They may also be given through the API (`PUT /api/v1/ldap/ca`, [ldap.md](ldap.md)), with no file. With either, **only** those are trusted. |
+| `server_name` | the host of `url` | A name the server's certificate must have. Not needed when the server shows exactly a certificate you gave (`ca_file` or the API): then the name is checked only if this is set ([ldap.md](ldap.md)). |
+| `bind_dn` | **required** | The service account that searches. It needs to read only. |
+| `password_env` | **required** | The **name of an environment variable** with its password. |
+| `user_base` | **required** | Where people are searched (the whole subtree). |
+| `user_filter` | **required** | An LDAP filter with `{user}` (the name that logs in, escaped). It must find one entry, and **should not find disabled people**. |
+| `group_base` | none: no groups | Where groups are searched. Grants for `group` need it. |
+| `group_filter` | `(member={dn})` | The groups of a person; `{dn}` is the person's entry, `{user}` the name. One of them must be there. |
+| `group_name` | `cn` | The attribute of a group that a grant names. |
+| `refresh` | `5m` | How long what the directory said of a person is trusted before it is asked again. |
+
 ## `grants`
 
 A grant gives an account actions on the paths of repositories. A grant on a **group** is what a client of the group needs: it reads everything the group answers with, whichever member has it, and writes to `write_to`; the grants of the members are not asked. It is what the **account** may do; a token has a scope of its own and the request needs both ([access.md](access.md), [api.md](api.md)).
 
 | Word | Default | Meaning |
 |---|---|---|
-| `account` | **required** | The name of an account. A grant for an account that does not exist is not an error (the account may be made later). |
+| `account` | one of `account`, `group` | The name of an account. A grant for an account that does not exist is not an error (the account may be made later). |
+| `group` | one of `account`, `group` | A group of the directory (`ldap`), compared without regard to capitals: the people in it have the grant. Local accounts have no groups. |
 | `repositories` | **required** | Patterns of repository names. |
 | `paths` | every path | Patterns of the paths inside the repository. For `oci` the path is the image: `team/**` is every image under `team/` ([oci.md](oci.md)). |
 | `actions` | **required** | `read`, `write`, `delete`, `promote`, `admin`. `admin` on a place is every action there. (`promote` has no meaning yet: nothing promotes.) |

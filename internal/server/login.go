@@ -10,6 +10,7 @@ import (
 
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
+	"github.com/zystem/godepot/internal/ldapauth"
 )
 
 // errThrottled: too many failed logins came from one address lately.
@@ -66,11 +67,14 @@ func (s *Server) password(r *http.Request, user, pass string) (*auth.Principal, 
 	if s.fails.blocked(ip, time.Now()) {
 		return nil, errThrottled
 	}
-	p, err := s.Auth.Login(r.Context(), user, pass)
+	p, err := s.check(r.Context(), user, pass)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalid) {
 			s.fails.add(ip, time.Now())
 			s.Audit.Record(r.Context(), audit.Event{Actor: user, Remote: ip, Action: "login", Result: audit.Refused, Detail: err.Error()})
+		}
+		if errors.Is(err, ldapauth.ErrUnavailable) {
+			s.directoryFailed(r, user, err) // the answer says little: why is here
 		}
 		return nil, err
 	}
@@ -144,6 +148,8 @@ func (s *Server) loginRefused(w http.ResponseWriter, err error) {
 	case errors.Is(err, errThrottled), errors.Is(err, auth.ErrBusy):
 		w.Header().Set("Retry-After", "5")
 		fail(w, http.StatusTooManyRequests, "too many logins: try again later")
+	case errors.Is(err, ldapauth.ErrUnavailable):
+		directoryDown(w, fail)
 	case errors.Is(err, auth.ErrInvalid):
 		w.Header().Set("WWW-Authenticate", `Basic realm="godepot", charset="UTF-8"`)
 		fail(w, http.StatusUnauthorized, "the account or the password is not right")
@@ -214,6 +220,10 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword string `json:"new_password"`
 	}
 	if !readJSON(w, r, &body) {
+		return
+	}
+	if st, err := s.Auth.DirectoryState(r.Context(), strings.ToLower(body.Account)); err == nil && s.ldap() != nil && !st.Local {
+		fail(w, http.StatusBadRequest, "the password of an account of the directory is changed in the directory")
 		return
 	}
 	if err := auth.CheckNewPassword(body.NewPassword); err != nil {
