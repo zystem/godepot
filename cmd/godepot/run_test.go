@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zystem/godepot/internal/meta"
+	"github.com/zystem/godepot/internal/seal"
 )
 
 func runCmd(args ...string) (int, string, string) {
@@ -56,7 +58,16 @@ func TestCommandsAgainstTheStand(t *testing.T) {
 	if os.Getenv("GODEPOT_BLOBGATE_URL") == "" || os.Getenv("GODEPOT_RQLITE_URL") == "" {
 		t.Skip("GODEPOT_BLOBGATE_URL and GODEPOT_RQLITE_URL are not set (tools/test/blobgate-stand.sh)")
 	}
-	if code, out, errs := runCmd("validate"); code != 0 || out != "settings: ok\ndatabase: ok\nstore: ok\n" {
+	keyFile := newSealKey(t)
+	t.Setenv("GODEPOT_SEAL_KEY_FILE", "")
+	if code, _, errs := runCmd("validate"); code != exitFailed || !strings.Contains(errs, "GODEPOT_SEAL_KEY_FILE is required") {
+		t.Fatalf("validate with no key file named: %d %q", code, errs)
+	}
+	if code, _, errs := runCmd("serve"); code != exitFailed || !strings.Contains(errs, "GODEPOT_SEAL_KEY_FILE is required") {
+		t.Fatalf("serve with no key file named: %d %q", code, errs)
+	}
+	t.Setenv("GODEPOT_SEAL_KEY_FILE", keyFile)
+	if code, out, errs := runCmd("validate"); code != 0 || out != "settings: ok\ndatabase: ok\nseal key: not made yet (serve makes it)\nstore: ok\n" {
 		t.Fatalf("validate: %d %q %q", code, out, errs)
 	}
 	if code, out, errs := runCmd("migrate"); code != 0 || !strings.Contains(out, "the schema of the database is at version") {
@@ -70,6 +81,32 @@ func TestCommandsAgainstTheStand(t *testing.T) {
 	}
 	if code, out, _ := runCmd("reconcile", "-fix"); code != 0 || strings.Contains(out, "dry") {
 		t.Fatalf("reconcile -fix: %d %q", code, out)
+	}
+	// the seal key: made for the database as serve would, moved to another file, reset
+	if _, _, err := seal.Open(context.Background(), meta.NewRqlite(os.Getenv("GODEPOT_RQLITE_URL")), keyFile, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	newFile := keyFile + ".new"
+	if code, _, errs := runCmd("reseal"); code != exitUsage || !strings.Contains(errs, "path of the new key file") {
+		t.Fatalf("reseal with no file: %d %q", code, errs)
+	}
+	if code, out, errs := runCmd("reseal", newFile); code != 0 || !strings.HasPrefix(out, "0 secrets are sealed with the key of "+newFile) {
+		t.Fatalf("reseal: %d %q %q", code, out, errs)
+	}
+	if code, _, errs := runCmd("validate"); code != exitFailed || !strings.Contains(errs, "holds another key") {
+		t.Fatalf("validate with the old key: %d %q", code, errs)
+	}
+	if code, _, errs := runCmd("reset-seal-key"); code != exitUsage || !strings.Contains(errs, "say -yes") {
+		t.Fatalf("reset-seal-key without -yes: %d %q", code, errs)
+	}
+	if code, _, errs := runCmd("migrate", "-yes"); code != exitUsage || !strings.Contains(errs, "-yes is for reset-seal-key") {
+		t.Fatalf("-yes elsewhere: %d %q", code, errs)
+	}
+	if code, out, errs := runCmd("reset-seal-key", "-yes"); code != 0 || !strings.HasPrefix(out, "the seal key of the database is reset; passwords removed: 0\n") {
+		t.Fatalf("reset-seal-key: %d %q %q", code, out, errs)
+	}
+	if code, out, _ := runCmd("validate"); code != 0 || !strings.Contains(out, "seal key: ok") {
+		t.Fatalf("validate after the reset: %d %q", code, out)
 	}
 	t.Setenv("GODEPOT_BLOBGATE_STORE", "no-such-store")
 	if code, _, errs := runCmd("check"); code != exitFailed || errs == "" {
@@ -117,6 +154,23 @@ func standEnv(t *testing.T) {
 	if os.Getenv("GODEPOT_BLOBGATE_URL") == "" || os.Getenv("GODEPOT_RQLITE_URL") == "" {
 		t.Skip("GODEPOT_BLOBGATE_URL and GODEPOT_RQLITE_URL are not set (tools/test/blobgate-stand.sh)")
 	}
+	newSealKey(t)
+}
+
+// newSealKey gives a test a key file of its own, and takes from the database the key that an earlier test left.
+func newSealKey(t *testing.T) string {
+	t.Helper()
+	db := meta.NewRqlite(os.Getenv("GODEPOT_RQLITE_URL"))
+	forget := func() {
+		for _, sql := range []string{"DELETE FROM seal", "DELETE FROM secrets"} {
+			_, _ = db.Exec(context.Background(), meta.S(sql)) // a database with no tables yet has nothing to remove
+		}
+	}
+	forget()
+	t.Cleanup(forget) // the key of this test must not stop a program that is run on the stand later
+	path := filepath.Join(t.TempDir(), "seal.key")
+	t.Setenv("GODEPOT_SEAL_KEY_FILE", path)
+	return path
 }
 
 // serve: answers /healthz, /readyz and /metrics, does the background work as the leader, and on the end of its context lets go of the lease and returns.
@@ -221,5 +275,65 @@ func TestReconcileSaysWhenDataIsLost(t *testing.T) {
 	code, out, _ := runCmd("reconcile")
 	if code != exitMissing || !strings.Contains(out, "MISSING: 1 live blobs") || !strings.Contains(out, digest) {
 		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// A key that is not right: serve stays for a while, alive and not ready, and goes on by itself when the database's key is reset; when nothing is done it ends with the advice.
+func TestServeWaitsWhenTheSealKeyIsNotRight(t *testing.T) {
+	standEnv(t)
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Port, cfg.MetricsPort = 18170, 0
+	a := newApp(cfg, os.Stdout, os.Stderr)
+	ctx := context.Background()
+	if err := a.start(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seal.Open(ctx, a.db, cfg.SealKeyFile+".first", time.Now()); err != nil { // the database's key is not the one of the settings
+		t.Fatal(err)
+	}
+	a.keyWait = 2 * time.Second
+	if err := a.serve(ctx); err == nil || !strings.Contains(err.Error(), "godepot reset-seal-key -yes") {
+		t.Fatalf("nothing was done: %v", err)
+	}
+
+	a.keyWait = 20 * time.Second
+	run, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- a.serve(run) }()
+	await := func(path string, code int, body string) {
+		t.Helper()
+		var got string
+		for range 100 {
+			resp, err := http.Get("http://127.0.0.1:18170" + path)
+			if err == nil {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode == code && strings.Contains(string(b), body) {
+					return
+				}
+				got = resp.Status + " " + string(b)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("%s: %s", path, got)
+	}
+	await("/readyz", 503, `"seal_key":"fail"`)
+	await("/healthz", 200, "ok")
+	if code, out, errs := runCmd("reset-seal-key", "-yes"); code != 0 {
+		t.Fatalf("reset: %d %q %q", code, out, errs)
+	}
+	await("/readyz", 200, `"status":"ready"`)
+	stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("serve did not end")
 	}
 }

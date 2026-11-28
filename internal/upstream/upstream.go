@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
-	"github.com/zystem/godepot/internal/secret"
 	"github.com/zystem/godepot/internal/settings"
 )
 
@@ -99,37 +97,16 @@ type bearer struct {
 	expires time.Time
 }
 
-// credentials reads the password and the token of an upstream: from the environment variables that the settings name, or from the files that NAME_FILE names.
-func credentials(repo string, u settings.Upstream) (pass, token string, err error) {
-	for _, c := range []struct {
-		setting, name string
-		to            *string
-	}{{"password_env", u.PasswordEnv, &pass}, {"token_env", u.TokenEnv, &token}} {
-		if c.name == "" {
-			continue
-		}
-		if *c.to, err = secret.Read(os.Getenv, c.name); err != nil {
-			return "", "", fmt.Errorf("upstream.%s of %s: %w", c.setting, repo, err)
-		}
-		if *c.to == "" {
-			return "", "", fmt.Errorf("the environment variable %s (upstream.%s of %s) is not set, and %s_FILE names no file with it", c.name, c.setting, repo, c.name)
-		}
-	}
-	return pass, token, nil
-}
-
-// New makes the client of a proxy repository. The credentials are read from the environment variables or files the settings name.
-func New(repo string, u settings.Upstream, db meta.DB, m *Metrics) (*Client, error) {
+// New makes the client of a proxy repository with its credentials ("" for none): a Pool finds them.
+func New(repo string, u settings.Upstream, db meta.DB, m *Metrics, pass, token string) (*Client, error) {
 	base, err := url.Parse(u.URL)
 	if err != nil {
 		return nil, err
 	}
 	base.Path = strings.TrimRight(base.Path, "/")
 	c := &Client{Repo: repo, DB: db, M: m, cfg: u, base: base, toks: map[string]bearer{}}
-	if c.pass, c.token, err = credentials(repo, u); err != nil {
-		return nil, err
-	}
-	if u.PasswordEnv != "" {
+	c.pass, c.token = pass, token
+	if pass != "" {
 		c.user = u.Username
 	}
 	n := u.MaxConcurrent
@@ -174,13 +151,9 @@ func (c *Client) Close() {
 	c.http.CloseIdleConnections()
 }
 
-// Same says whether the client was made for these settings and for the credentials that are given now: a new password in a file makes a new client, with no restart.
-func (c *Client) Same(u settings.Upstream) bool {
-	if fmt.Sprintf("%+v", c.cfg) != fmt.Sprintf("%+v", u) {
-		return false
-	}
-	pass, token, err := credentials(c.Repo, u)
-	return err == nil && pass == c.pass && token == c.token
+// same says whether the client was made for these settings and these credentials.
+func (c *Client) same(u settings.Upstream, pass, token string) bool {
+	return fmt.Sprintf("%+v", c.cfg) == fmt.Sprintf("%+v", u) && pass == c.pass && token == c.token
 }
 
 func (c *Client) now() time.Time {

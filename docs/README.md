@@ -8,6 +8,7 @@ Each page is of one kind: **tutorial** (one path that works), **how-to** (one ta
 | [oci-clients.md](oci-clients.md) | how-to | `helm`, `oras`, `crane`, `skopeo`, `cosign` |
 | [ci-jobs.md](ci-jobs.md) | how-to | publish from CI with no stored secret |
 | [ldap.md](ldap.md) | how-to | log in with LDAP or Active Directory |
+| [secrets.md](secrets.md) | how-to | the passwords of upstreams and the directory, and the seal key: give, move, lose |
 | [configuration.md](configuration.md) | reference | settings, commands, exit codes |
 | [settings-file.md](settings-file.md) | reference | repositories, grants, trusts, the directory |
 | [api.md](api.md) | reference | the API and the audit log |

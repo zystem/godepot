@@ -160,7 +160,7 @@ func (c Config) connect(ctx context.Context) (*ldap.Conn, error) {
 	}
 	if c.BindPassword == "" {
 		_ = conn.Close()
-		return nil, unavailable("the service account has no password (the environment variable or its file is empty)")
+		return nil, unavailable("the service account has no password (none is kept, or the variable or its file is empty)")
 	}
 	if err := conn.Bind(c.BindDN, c.BindPassword); err != nil {
 		_ = conn.Close()

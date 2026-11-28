@@ -93,7 +93,8 @@ type Upstream struct {
 	// URL is the address of the upstream: its origin, and a path when it has one ("https://registry-1.docker.io", "https://repo.example.com/raw"). Required.
 	URL string `json:"url"`
 	// Username and PasswordEnv are sent as basic authentication (for a registry that has a token service: to the service of the hosts in TokenHosts). TokenEnv is sent as a bearer token. The secrets
-	// are never in the file: PasswordEnv and TokenEnv name environment variables.
+	// are never in the file: they are given with the API and kept sealed in the database (internal/seal),
+	// or PasswordEnv and TokenEnv name environment variables (or, as NAME_FILE, files) that hold them.
 	Username    string `json:"username,omitempty"`
 	PasswordEnv string `json:"password_env,omitempty"`
 	TokenEnv    string `json:"token_env,omitempty"`
@@ -262,8 +263,8 @@ func (s *Settings) checkLDAP(add func(string, ...any)) {
 			add("ldap: %s is required", f.name)
 		}
 	}
-	if !envNameRE.MatchString(l.PasswordEnv) {
-		add("ldap: password_env is required: the name of the environment variable that holds the password of bind_dn")
+	if l.PasswordEnv != "" && !envNameRE.MatchString(l.PasswordEnv) {
+		add("ldap: password_env names an environment variable (letters, digits, '_')")
 	}
 	if l.UserFilter != "" && !strings.Contains(l.UserFilter, "{user}") {
 		add("ldap: user_filter has no {user}: it would find the same entry for every name")
@@ -537,7 +538,7 @@ func (s *Settings) checkProxy(who string, r *Repo, add func(string, ...any)) {
 	case err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "":
 		add("%s: upstream.url is %q: it must be an address like https://registry.example.com", who, u.URL)
 	case p.User != nil || p.RawQuery != "" || p.Fragment != "":
-		add("%s: upstream.url has a user name, a query or a fragment: credentials go in password_env or token_env", who)
+		add("%s: upstream.url has a user name, a query or a fragment: credentials are given with the API, or with password_env or token_env", who)
 	}
 	for _, e := range []struct{ name, v string }{{"password_env", u.PasswordEnv}, {"token_env", u.TokenEnv}} {
 		if e.v != "" && !envNameRE.MatchString(e.v) {
@@ -549,9 +550,6 @@ func (s *Settings) checkProxy(who string, r *Repo, add func(string, ...any)) {
 	}
 	if u.PasswordEnv != "" && u.TokenEnv != "" {
 		add("%s: upstream has both password_env and token_env: use one", who)
-	}
-	if (u.Username != "" || u.TokenEnv != "") && u.PasswordEnv == "" && u.TokenEnv == "" {
-		add("%s: upstream.username needs password_env", who)
 	}
 	for _, h := range append(append([]string{}, u.TokenHosts...), u.FileHosts...) {
 		if h == "" || strings.ContainsAny(h, "/: ") {

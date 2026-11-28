@@ -72,8 +72,13 @@ func (s *Server) ldapConfig(ctx context.Context, l *settings.LDAP) (ldapauth.Con
 	if err != nil {
 		return ldapauth.Config{}, err
 	}
-	// Read at each use too: a new password in the file of NAME_FILE needs no restart.
-	password, err := secret.Read(os.Getenv, l.PasswordEnv)
+	// The password too is read at each use, so a new one needs no restart: from the variable (or file) that the settings name, else the one given with the API.
+	var password string
+	if l.PasswordEnv != "" {
+		password, err = secret.Read(os.Getenv, l.PasswordEnv)
+	} else if s.Secrets != nil {
+		password, _, err = s.Secrets.Get(ctx, ldapSecret)
+	}
 	// A password that cannot be read is told as a directory that cannot be asked: the same answer, audit line and use of what is kept.
 	c := ldapauth.Config{
 		BindError: err,

@@ -26,6 +26,8 @@ type Config struct {
 	LeaseTTL     time.Duration
 	// ConfigFile is the settings file (repositories, grants); "" is none: then no repository is served.
 	ConfigFile string
+	// SealKeyFile is the file with the key that the secrets of the database are sealed with; serve and validate need it.
+	SealKeyFile string
 	// TokenMaxLife is the longest life a token may have.
 	TokenMaxLife time.Duration
 	// MaxDownloads is how many blobs may be sent at once (docs/spec.md, P11); MinRate is the least speed of a client in bytes a second, 0 for none.
@@ -61,6 +63,7 @@ func loadConfig(env func(string) string) (*Config, error) {
 	c.RqliteURL = env("GODEPOT_RQLITE_URL")
 	c.BlobgateURL = env("GODEPOT_BLOBGATE_URL")
 	c.Tenant = env("GODEPOT_BLOBGATE_TENANT")
+	c.SealKeyFile = env("GODEPOT_SEAL_KEY_FILE")
 	if s := env("GODEPOT_BLOBGATE_STORE"); s != "" {
 		c.Store = s
 	}

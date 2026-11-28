@@ -250,6 +250,20 @@ var steps = [][]string{
 			set_at INTEGER NOT NULL
 		)`,
 	},
+	// 9: secrets that godepot shows to others, sealed (internal/seal, docs/secrets.md). seal holds the check value of the key, one row or none; the key itself is never in the database.
+	9: {
+		`CREATE TABLE seal (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			check_value TEXT NOT NULL,
+			at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE secrets (
+			name TEXT PRIMARY KEY,
+			sealed TEXT NOT NULL,
+			set_by TEXT NOT NULL,
+			set_at INTEGER NOT NULL
+		) WITHOUT ROWID`,
+	},
 }
 
 // Version is the number of the schema this program writes.
