@@ -38,7 +38,7 @@ A 10 GiB object, 50 to 500 slow readers, 200 000 small objects and `kill -9` of 
 - **Formats** other than `raw`, `oci`, `go`, `pypi`, `npm` and `maven`; promotion and builds; single sign-on of people; the token flow of `docker login`; the web pages: steps 7 to 12 of the plan.
 - Parts in the layer itself: the OCI door takes the parts in as blobs and writes the layer once more at the end ([oci.md](oci.md)).
 - TLS on the port of the program.
-- CI has run on GitHub (pull request 3, 2026-11-18: `test`, `analysis`, `reproducible` and `image` passed). The release workflow is written and has not run ([release.md](release.md)); the chart, the supply-chain gates (Scorecard, dependency review, fuzzing), the security documents, `CONTRIBUTING` and the OpenSSF badge are not there.
+- CI has run on GitHub (pull request 3, 2026-11-18: `test`, `analysis`, `reproducible` and `image` passed). The release workflow ran first for 0.7.1 on 2026-11-28 ([release.md](release.md)); the chart, the supply-chain gates (Scorecard, dependency review, fuzzing), the security documents, `CONTRIBUTING` and the OpenSSF badge are not there.
 
 ## Fixed in step 5, found by a flaky test
 
