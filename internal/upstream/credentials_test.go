@@ -36,14 +36,18 @@ func TestCredentialsFromFiles(t *testing.T) {
 	if err != nil || b == a || b.pass != "second" {
 		t.Fatal("the new password of the file was not taken", err)
 	}
-	for want, change := range map[string]func(){
-		"is not set":   func() { write("\n") },
-		"password_env": func() { _ = os.Remove(file) },
-		"both set":     func() { t.Setenv("TEST_UP_PASSWORD", "x") },
+	// in this order: each case builds on the one before
+	for _, c := range []struct {
+		want   string
+		change func()
+	}{
+		{"is not set", func() { write("\n") }},
+		{"password_env", func() { _ = os.Remove(file) }},
+		{"both set", func() { t.Setenv("TEST_UP_PASSWORD", "x") }},
 	} {
-		change()
-		if _, err := pool.Client(repo); err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("want an error with %q: %v", want, err)
+		c.change()
+		if _, err := pool.Client(repo); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("want an error with %q: %v", c.want, err)
 		}
 	}
 
