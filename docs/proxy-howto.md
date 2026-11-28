@@ -123,10 +123,12 @@ curl -s -X POST -H "Authorization: Bearer $T" http://127.0.0.1:18390/api/v1/repo
 
 ## Credentials for a private upstream
 
-For an upstream that needs a user and a password, name the **environment variable** that holds the password; the password is not in the file:
+For an upstream that needs a user and a password, name the **environment variable** that holds the password; the password is not in the settings file:
 
 ```json
 {"name": "hub", "format": "oci", "kind": "proxy", "upstream": {"url": "https://registry-1.docker.io", "username": "mybot", "password_env": "HUB_PASSWORD", "token_hosts": ["auth.docker.io"]}}
 ```
+
+Give godepot `HUB_PASSWORD`, or better `HUB_PASSWORD_FILE` with the path of a file that holds the password. A new password written into that file is used by the next request, with no restart. Run on 2026-11-28 against a local server that asks for basic authentication, with a raw proxy: the password was changed on both sides and the next file was served (`200`), with no restart.
 
 `token_hosts` lets the credentials go to the token service of Docker Hub, which is on another host; without it the service is asked for an anonymous token. **Not run** with a real account: the examples above are anonymous. What was run is a false registry with a token service ([proxy.md](proxy.md)).

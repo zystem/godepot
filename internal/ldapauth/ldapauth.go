@@ -39,11 +39,13 @@ type Config struct {
 	ServerName   string
 	BindDN       string
 	BindPassword string
-	UserBase     string
-	UserFilter   string // "{user}" is the name that logs in, escaped
-	GroupBase    string // "": no groups are read
-	GroupFilter  string // "{dn}" is the entry of the person, "{user}" the name, both escaped
-	GroupName    string // the attribute of a group that is its name
+	// BindError says why the password of the service account could not be read; the directory is then not asked.
+	BindError   error
+	UserBase    string
+	UserFilter  string // "{user}" is the name that logs in, escaped
+	GroupBase   string // "": no groups are read
+	GroupFilter string // "{dn}" is the entry of the person, "{user}" the name, both escaped
+	GroupName   string // the attribute of a group that is its name
 }
 
 const (
@@ -152,9 +154,13 @@ func (c Config) connect(ctx context.Context) (*ldap.Conn, error) {
 			return nil, unavailable("StartTLS: %v", err)
 		}
 	}
+	if c.BindError != nil {
+		_ = conn.Close()
+		return nil, unavailable("the password of the service account cannot be read: %v", c.BindError)
+	}
 	if c.BindPassword == "" {
 		_ = conn.Close()
-		return nil, unavailable("the service account has no password (the environment variable is empty)")
+		return nil, unavailable("the service account has no password (the environment variable or its file is empty)")
 	}
 	if err := conn.Bind(c.BindDN, c.BindPassword); err != nil {
 		_ = conn.Close()

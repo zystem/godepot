@@ -37,6 +37,6 @@ A finding of a scanner in a component godepot ships is fixed, or is recorded in 
 ## Secrets and credentials
 
 - No secret is committed; GitHub secret scanning and push protection are on.
-- godepot takes its own secrets from the environment or a file (`NAME_FILE`); upstream and directory passwords from environment variables that the settings name. They are not logged.
+- godepot takes its own secrets, and the upstream and directory passwords and tokens that the settings name, from the environment or from a file (`NAME_FILE`). A password or token in a file can be changed with no restart ([configuration.md](configuration.md)). They are not logged.
 - CI has no long-lived secret: a release uses the token of the run and the identity of the workflow. A new secret in CI needs a reason in the pull request and is limited to the job that needs it.
 - A secret is replaced when someone who knew it leaves, when it may have been seen, and at least once a year. One that leaked is replaced first, and the audit log is then read for its use.

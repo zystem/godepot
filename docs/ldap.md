@@ -26,6 +26,12 @@ The password of the service account comes from an environment variable of godepo
 export GODEPOT_LDAP_PASSWORD='the password of the service account'
 ```
 
+Better, give a file that holds it, which godepot reads at each use, so that a new password needs no restart ([configuration.md](configuration.md)). Set one of the two, not both:
+
+```bash
+export GODEPOT_LDAP_PASSWORD_FILE=/run/secrets/ldap-password
+```
+
 ## 2. The settings
 
 Active Directory:
@@ -128,10 +134,12 @@ The answer says little. The audit log has the reason: `GET /api/v1/audit?action=
 | `503` | `... certificate has expired or is not yet valid` | a new certificate on the server (give it to godepot if it is self-signed); look at the clocks |
 | `503` | `... certificate is valid for ..., not ...`, `... doesn't contain any IP SANs` or `... legacy Common Name field ...` | the certificate lacks the name: with a `ca.crt` use in `url` a name it has, or set `server_name`; or give the server's own certificate instead |
 | `503` | `the bind of the service account: ...` | `bind_dn` or the password variable; Active Directory refuses a bind without TLS |
-| `503` | `... has no password (the environment variable is empty)` | set the variable that `password_env` names, and restart |
+| `503` | `... has no password (the environment variable or its file is empty)` | set the variable that `password_env` names and restart, or write the password into the file of `NAME_FILE` |
+| `503` | `the password of the service account cannot be read: ...` | the file that `NAME_FILE` names is missing or cannot be read by godepot, or both `NAME` and `NAME_FILE` are set |
 
 ## Checked
 
+- 2026-11-28, the password of the service account **in a file** (`L_BIND_PW_BY_FILE=1`): Active Directory (LDAPS) and AD LDS (StartTLS) passed the script. A new password in the file with no restart was run against the false directory only (`internal/server/ldap_test.go`).
 - 2026-11-27, `tools/test/ldap-run.sh` ([testing.md](testing.md)) against Windows Server 2025: **Active Directory** (LDAPS) and **AD LDS** (LDAPS and StartTLS): login, grants by group, groups inside groups (AD), disabled and expired-password users not let in, no secret in the log.
 - 2026-11-27, the same script with `L_CA_BY_API=1`: a self-signed `server.crt` (AD LDS, LDAPS and StartTLS) and the `ca.crt` of Active Directory, each given with `PUT /api/v1/ldap/ca`. The answers shown in step 3 are of a certificate made with `openssl` for this page.
 - 2026-11-27, the `openssl s_client` command of step 3 against AD LDS, plain TLS and StartTLS: the fingerprint was that of the server's certificate.

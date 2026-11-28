@@ -3,6 +3,8 @@ package server_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +219,37 @@ func TestARememberedPasswordDoesNotKeepARemovedPersonIn(t *testing.T) {
 	r.clock.Add(61)
 	if code, _, _ := r.basic("GET", "/repository/files/dev/none", "alice", "alice's directory password", ""); code != 401 {
 		t.Fatalf("a removed person with a remembered password: %d", code)
+	}
+}
+
+// The password of the service account may be in a file: it is read at each use, so a new one needs no restart, and one that cannot be read is a directory that cannot be asked.
+func TestTheServicePasswordFromAFile(t *testing.T) {
+	r := newRig(t)
+	d := r.directory("5m")
+	file := filepath.Join(t.TempDir(), "ldap-password")
+	t.Setenv("TEST_LDAP_PASSWORD", "")
+	t.Setenv("TEST_LDAP_PASSWORD_FILE", file)
+	write := func(s string) {
+		if err := os.WriteFile(file, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	login := func(want int) {
+		t.Helper()
+		r.want(want, "POST", "/api/v1/login", "", `{"account": "alice", "password": "alice's directory password"}`)
+	}
+	login(503) // no file yet
+	if !strings.Contains(r.log.String(), "TEST_LDAP_PASSWORD_FILE") {
+		t.Fatal("the log does not say which file cannot be read")
+	}
+	write("service secret\n")
+	login(201)
+	d.Password(svcDN, "the new service secret") // changed in the directory
+	r.clock.Add(11 * 60)                        // past the time a checked password is remembered
+	login(503)
+	write("the new service secret\n")
+	login(201)
+	if strings.Contains(r.log.String(), "service secret") {
+		t.Fatal("a password is in the log")
 	}
 }

@@ -1,0 +1,68 @@
+package upstream
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zystem/godepot/internal/settings"
+)
+
+// The credentials of an upstream come from the variable or from the file of NAME_FILE, and a new one in the file makes a new client.
+func TestCredentialsFromFiles(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "secret")
+	write := func(s string) {
+		if err := os.WriteFile(file, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("TEST_UP_PASSWORD_FILE", file)
+	t.Setenv("TEST_UP_TOKEN", "a-token")
+	pool := &Pool{}
+	repo := &settings.Repo{Name: "hub", Upstream: &settings.Upstream{URL: "https://upstream.example", Username: "bot", PasswordEnv: "TEST_UP_PASSWORD"}}
+
+	write("first\n")
+	a, err := pool.Client(repo)
+	if err != nil || a.user != "bot" || a.pass != "first" {
+		t.Fatal(a, err)
+	}
+	if b, err := pool.Client(repo); err != nil || b != a {
+		t.Fatal("a new client for the same password", err)
+	}
+	write("second\n")
+	b, err := pool.Client(repo)
+	if err != nil || b == a || b.pass != "second" {
+		t.Fatal("the new password of the file was not taken", err)
+	}
+	for want, change := range map[string]func(){
+		"is not set":   func() { write("\n") },
+		"password_env": func() { _ = os.Remove(file) },
+		"both set":     func() { t.Setenv("TEST_UP_PASSWORD", "x") },
+	} {
+		change()
+		if _, err := pool.Client(repo); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("want an error with %q: %v", want, err)
+		}
+	}
+
+	c, err := pool.Client(&settings.Repo{Name: "other", Upstream: &settings.Upstream{URL: "https://upstream.example", TokenEnv: "TEST_UP_TOKEN"}})
+	if err != nil || c.token != "a-token" || c.pass != "" {
+		t.Fatal(c, err)
+	}
+}
+
+// A request that waits for the rate of a client goes on after the client was replaced.
+func TestAReplacedClientStillTicks(t *testing.T) {
+	c, err := New("hub", settings.Upstream{URL: "https://upstream.example", MaxPerSecond: 100}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	select {
+	case <-c.tick.C:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request would wait for ever")
+	}
+}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/zystem/godepot/internal/meta"
 	"github.com/zystem/godepot/internal/metrics"
+	"github.com/zystem/godepot/internal/secret"
 	"github.com/zystem/godepot/internal/settings"
 )
 
@@ -98,7 +99,26 @@ type bearer struct {
 	expires time.Time
 }
 
-// New makes the client of a proxy repository. The credentials are read from the environment variables the settings name.
+// credentials reads the password and the token of an upstream: from the environment variables that the settings name, or from the files that NAME_FILE names.
+func credentials(repo string, u settings.Upstream) (pass, token string, err error) {
+	for _, c := range []struct {
+		setting, name string
+		to            *string
+	}{{"password_env", u.PasswordEnv, &pass}, {"token_env", u.TokenEnv, &token}} {
+		if c.name == "" {
+			continue
+		}
+		if *c.to, err = secret.Read(os.Getenv, c.name); err != nil {
+			return "", "", fmt.Errorf("upstream.%s of %s: %w", c.setting, repo, err)
+		}
+		if *c.to == "" {
+			return "", "", fmt.Errorf("the environment variable %s (upstream.%s of %s) is not set, and %s_FILE names no file with it", c.name, c.setting, repo, c.name)
+		}
+	}
+	return pass, token, nil
+}
+
+// New makes the client of a proxy repository. The credentials are read from the environment variables or files the settings name.
 func New(repo string, u settings.Upstream, db meta.DB, m *Metrics) (*Client, error) {
 	base, err := url.Parse(u.URL)
 	if err != nil {
@@ -106,16 +126,11 @@ func New(repo string, u settings.Upstream, db meta.DB, m *Metrics) (*Client, err
 	}
 	base.Path = strings.TrimRight(base.Path, "/")
 	c := &Client{Repo: repo, DB: db, M: m, cfg: u, base: base, toks: map[string]bearer{}}
-	if u.PasswordEnv != "" {
-		if c.pass = os.Getenv(u.PasswordEnv); c.pass == "" {
-			return nil, fmt.Errorf("the environment variable %s (upstream.password_env of %s) is not set", u.PasswordEnv, repo)
-		}
-		c.user = u.Username
+	if c.pass, c.token, err = credentials(repo, u); err != nil {
+		return nil, err
 	}
-	if u.TokenEnv != "" {
-		if c.token = os.Getenv(u.TokenEnv); c.token == "" {
-			return nil, fmt.Errorf("the environment variable %s (upstream.token_env of %s) is not set", u.TokenEnv, repo)
-		}
+	if u.PasswordEnv != "" {
+		c.user = u.Username
 	}
 	n := u.MaxConcurrent
 	if n <= 0 {
@@ -153,17 +168,19 @@ func New(repo string, u settings.Upstream, db meta.DB, m *Metrics) (*Client, err
 	return c, nil
 }
 
-// Close stops what the client runs.
+// Close lets go of what the client holds. The ticker of the rate is not stopped: a request of this client may still wait for it when a new password or new settings replace the client, and Go takes
+// away a ticker that nothing holds any more.
 func (c *Client) Close() {
-	if c.tick != nil {
-		c.tick.Stop()
-	}
 	c.http.CloseIdleConnections()
 }
 
-// Same says whether the client was made for these settings.
+// Same says whether the client was made for these settings and for the credentials that are given now: a new password in a file makes a new client, with no restart.
 func (c *Client) Same(u settings.Upstream) bool {
-	return fmt.Sprintf("%+v", c.cfg) == fmt.Sprintf("%+v", u)
+	if fmt.Sprintf("%+v", c.cfg) != fmt.Sprintf("%+v", u) {
+		return false
+	}
+	pass, token, err := credentials(c.Repo, u)
+	return err == nil && pass == c.pass && token == c.token
 }
 
 func (c *Client) now() time.Time {

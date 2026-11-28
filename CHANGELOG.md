@@ -5,6 +5,7 @@ All notable changes. The form is that of [Keep a Changelog](https://keepachangel
 ## [Unreleased]
 
 ### Added
+* The passwords and tokens that `password_env` and `token_env` name (upstreams, the directory) may be in a file, `NAME_FILE`; a new one in the file is used with no restart ([docs/configuration.md](docs/configuration.md)).
 * The project's documents: [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [GOVERNANCE.md](GOVERNANCE.md), the security requirements, threat model, assurance case and policies; dependency review and a sign-off check on pull requests.
 
 ### Fixed

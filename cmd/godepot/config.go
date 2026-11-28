@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/zystem/godepot/internal/secret"
 )
 
 // Config is everything the program reads from its environment. docs/configuration.md says each setting; a test fails when one is missing there.
@@ -34,22 +34,6 @@ type Config struct {
 	// TrashDays is how long what is removed stays in the trash (docs/spec.md, C3); 0 frees at once. CleanupEvery is how often the policies run.
 	TrashDays    int
 	CleanupEvery time.Duration
-}
-
-// getenv reads NAME, or the contents of the file that NAME_FILE names (a secret kept out of the environment of the process). Both set is an error.
-func getenv(env func(string) string, name string) (string, error) {
-	v, f := env(name), env(name+"_FILE")
-	if v != "" && f != "" {
-		return "", fmt.Errorf("%s and %s_FILE are both set: set one", name, name)
-	}
-	if f != "" {
-		b, err := os.ReadFile(f) // #nosec G304 -- the path is the operator's own setting (NAME_FILE): reading the file it names is the point
-		if err != nil {
-			return "", fmt.Errorf("%s_FILE: %w", name, err)
-		}
-		return strings.TrimRight(string(b), "\r\n"), nil
-	}
-	return v, nil
 }
 
 func number(env func(string) string, name string, def int, min int) (int, error) {
@@ -80,7 +64,7 @@ func loadConfig(env func(string) string) (*Config, error) {
 	if s := env("GODEPOT_BLOBGATE_STORE"); s != "" {
 		c.Store = s
 	}
-	c.Secret, err = getenv(env, "GODEPOT_BLOBGATE_SECRET")
+	c.Secret, err = secret.Read(env, "GODEPOT_BLOBGATE_SECRET")
 	add(err)
 	for _, u := range []struct{ name, v string }{{"GODEPOT_RQLITE_URL", c.RqliteURL}, {"GODEPOT_BLOBGATE_URL", c.BlobgateURL}} {
 		if u.v == "" {

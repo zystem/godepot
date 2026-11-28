@@ -172,7 +172,7 @@ publish releases/readme: 201 (read back, same bytes); publish other/readme: 403;
 
 ## A directory: LDAP and Active Directory
 
-The tests use a false directory of their own (`internal/testutil/directory.go`). `tools/test/ldap-run.sh` runs the program against a **real directory of yours**, given by the variables its head lists; it changes nothing there. With `L_CA_BY_API=1` the certificate is not named in the settings but given through the API (one more line, `trust`). A person it logs in must not be the name of a local account in the stand's database (a local account wins): start a fresh stand after `go test`. It needs the stand, `curl` and `python3`; ports 19290 and 19292.
+The tests use a false directory of their own (`internal/testutil/directory.go`). `tools/test/ldap-run.sh` runs the program against a **real directory of yours**, given by the variables its head lists; it changes nothing there. With `L_BIND_PW_BY_FILE=1` the program gets the password of the service account in a file (run on 2026-11-28 against AD and AD LDS: all lines `ok`). With `L_CA_BY_API=1` the certificate is not named in the settings but given through the API (one more line, `trust`). A person it logs in must not be the name of a local account in the stand's database (a local account wins): start a fresh stand after `go test`. It needs the stand, `curl` and `python3`; ports 19290 and 19292.
 
 ```
 login     ok       alice logged in at the directory: the grant of <group> lets them write (201), that of <other group> does not apply (403), the admin API is closed (403)
