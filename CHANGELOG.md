@@ -4,6 +4,9 @@ All notable changes. The form is that of [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+### Added
+* The project's documents: [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [GOVERNANCE.md](GOVERNANCE.md), the security requirements, threat model, assurance case and policies; dependency review and a sign-off check on pull requests.
+
 ### Fixed
 * The release script builds both programs before it writes an archive: the arm64 program of 0.7.1 is stamped as built from a changed tree (the source was that of the tag), so it cannot be made again byte for byte ([docs/verifying-releases.md](docs/verifying-releases.md)).
 

@@ -22,5 +22,7 @@ Each page is of one kind: **tutorial** (one path that works), **how-to** (one ta
 | [release.md](release.md) | how-to | cut a release |
 | [verifying-releases.md](verifying-releases.md) | how-to | check what a release published |
 | [status.md](status.md) | record | what is built, what was run, what is not |
+| [security-requirements.md](security-requirements.md), [security-policies.md](security-policies.md), [supported-versions.md](supported-versions.md) | reference | what to expect in security, the project's rules, which release gets fixes |
+| [threat-model.md](threat-model.md), [assurance-case.md](assurance-case.md) | explanation | the threats, and why the requirements are met |
 | [spec.md](spec.md), [plan.md](plan.md) | record | what it will be, and in which steps |
 | [step0-probes.md](step0-probes.md) | record | the first probes of blobgate |

@@ -2,7 +2,7 @@
 
 How-to. A release is a tag; the workflow `.github/workflows/release.yml` does the rest.
 
-1. In a pull request: move what is under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md) to `## [X.Y.Z] - <date>` (that text is the text of the release; the workflow stops before publishing anything when the section is missing), and bring the README's status and [status.md](status.md) up to date. Merge it and wait for `ci` on `main` to be green.
+1. In a pull request: update [supported-versions.md](supported-versions.md); move what is under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md) to `## [X.Y.Z] - <date>` (that text is the text of the release; the workflow stops before publishing anything when the section is missing), and bring the README's status and [status.md](status.md) up to date. Merge it and wait for `ci` on `main` to be green.
 2. Tag that commit and push the tag:
 
    ```bash
