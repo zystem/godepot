@@ -1,6 +1,6 @@
 # Cut a release
 
-How-to. A release is a tag; the workflow `.github/workflows/release.yml` does the rest. **The workflow has not run yet** (see [What was run](#what-was-run)).
+How-to. A release is a tag; the workflow `.github/workflows/release.yml` does the rest.
 
 1. In a pull request: move what is under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md) to `## [X.Y.Z] - <date>` (that text is the text of the release; the workflow stops before publishing anything when the section is missing), and bring the README's status and [status.md](status.md) up to date. Merge it and wait for `ci` on `main` to be green.
 2. Tag that commit and push the tag:
@@ -18,10 +18,10 @@ How-to. A release is a tag; the workflow `.github/workflows/release.yml` does th
    A version before 1.0, or with a suffix (`vX.Y.Z-rc.1`), is marked as a pre-release.
 4. Check what was published, as a user would ([verifying-releases.md](verifying-releases.md)).
 
-**The first time only:** a package that GitHub makes is **private** until its owner makes it public (Packages, the package, Package settings, Change visibility). The workflow cannot do it.
+The image `ghcr.io/zystem/godepot` is public (it can be pulled with no login; checked after 0.7.1). In a copy of this repository, look at the visibility of the new package: the workflow does not set it.
 
 A tag is not moved: a release that is wrong is replaced by the next version.
 
 ## What was run
 
-2026-11-28, by hand on one machine: `tools/release/package.sh` twice gave the same SHA-256 for both archives, and the amd64 program printed its version; `tools/release/notes.sh` printed the section of 0.7.0 and failed for a version with no section; the image was built for both platforms with provenance and SBOM, not pushed; `actionlint` found nothing in the workflows. **Not run:** the workflow itself (the publishing, the signatures, the attestations): the first tag after it is merged is its first run.
+2026-11-28: the workflow, for `v0.7.1`, its first run, passed; what it published was checked as [verifying-releases.md](verifying-releases.md) says. It showed one fault (the arm64 program was stamped as built from a changed tree), fixed in `tools/release/package.sh`: the fixed script, run in a clean copy with the archives written inside it, stamped both programs as unchanged. **The fixed script has not run in the workflow yet.** **Not run:** a tag with a suffix, a version from 1.0 on (`latest`).

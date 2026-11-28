@@ -2,7 +2,7 @@
 
 **godepot is a repository manager (packages and images for `docker`, `mvn`, `npm`, `pip`, `go`) that keeps every byte in [blobgate](https://github.com/zystem/blobgate), once, and frees the disk by itself.**
 
-> **Status, 2026-11-28: early, before 1.0** (settings and tables may still change). **Six formats are served**, each as hosted, proxy and group repositories: `raw` (files by path, with `curl`), `oci` (images, Helm charts and any artifact), `go`, `pypi`, `npm` and `maven`. People and programs get in with tokens, with the password of a local account or of LDAP or Active Directory, and CI jobs with their own signed token (OIDC). Also: cleanup with a trash, cooldown and block lists for proxies, an audit log, metrics. **Not built:** apt, rpm and Helm repositories, promotion and builds, single sign-on of people in a browser, web pages, TLS on its own port, a published image and signed releases (the workflow that makes them is there and has not run). What is built, what was run and what was not: [docs/status.md](docs/status.md); what comes next: [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md).
+> **Status, 2026-11-28: early, before 1.0** (settings and tables may still change). **Six formats are served**, each as hosted, proxy and group repositories: `raw` (files by path, with `curl`), `oci` (images, Helm charts and any artifact), `go`, `pypi`, `npm` and `maven`. People and programs get in with tokens, with the password of a local account or of LDAP or Active Directory, and CI jobs with their own signed token (OIDC). Also: cleanup with a trash, cooldown and block lists for proxies, an audit log, metrics. **Not built:** apt, rpm and Helm repositories, promotion and builds, single sign-on of people in a browser, web pages, TLS on its own port, signed tags. What is built, what was run and what was not: [docs/status.md](docs/status.md); what comes next: [docs/spec.md](docs/spec.md) and [docs/plan.md](docs/plan.md).
 
 ## When to use it, and when not
 
@@ -151,9 +151,10 @@ Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown
 
 | Way | For | Notes |
 |---|---|---|
+| `docker run ghcr.io/zystem/godepot:0.7.1` | production, tests | the published image (amd64, arm64), signed: [docs/verifying-releases.md](docs/verifying-releases.md); the git tags are not signed |
+| the archive of a [release](https://github.com/zystem/godepot/releases) | production without containers | the program for linux/amd64 and linux/arm64, signed, from 0.7.1 |
 | `docker build .` | tests, the try-it | a static program in an image with no shell, user 65532, a read-only root; nothing is written to a disk |
 | `go build ./cmd/godepot` (Go 1.26) | a workstation, changes | |
-| an image on `ghcr.io`, binaries, signatures ([docs/verifying-releases.md](docs/verifying-releases.md)) | production | **from the release after 0.7.0**; until then build it yourself from the tag |
 | a chart | production | **not built yet** |
 
 ## Words

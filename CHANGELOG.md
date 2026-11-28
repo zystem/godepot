@@ -4,6 +4,9 @@ All notable changes. The form is that of [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+### Fixed
+* The release script builds both programs before it writes an archive: the arm64 program of 0.7.1 is stamped as built from a changed tree (the source was that of the tag), so it cannot be made again byte for byte ([docs/verifying-releases.md](docs/verifying-releases.md)).
+
 ## [0.7.1] - 2026-11-28
 
 The first release with files. The program is that of 0.7.0.
