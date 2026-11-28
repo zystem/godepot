@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -34,6 +35,7 @@ import (
 	"github.com/zystem/godepot/internal/oci"
 	"github.com/zystem/godepot/internal/pypi"
 	"github.com/zystem/godepot/internal/raw"
+	"github.com/zystem/godepot/internal/seal"
 	"github.com/zystem/godepot/internal/server"
 	"github.com/zystem/godepot/internal/settings"
 	"github.com/zystem/godepot/internal/trash"
@@ -55,6 +57,8 @@ const usage = `usage: godepot <command>
   migrate      bring the schema of the database to the one this program writes, and stop
   check        try the store: a write of unknown length, a link, a range, a listing, a delete
   reconcile    compare the store with the database; with -fix, remove the keys that nothing names
+  reseal       seal the passwords of the database with the key of another file, made when it is not there: reseal NEWFILE
+  reset-seal-key  when the seal key is lost: remove the passwords sealed with it, so that a new key is taken: reset-seal-key -yes
   version      print the version
 
 The settings are environment variables; docs/configuration.md says each one.
@@ -82,7 +86,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
-	case "serve", "validate", "migrate", "check", "reconcile", "new-account", "new-token", "set-password":
+	case "serve", "validate", "migrate", "check", "reconcile", "new-account", "new-token", "set-password", "reseal", "reset-seal-key":
 	default:
 		fmt.Fprintf(stderr, "godepot: no command %q\n\n%s", cmd, usage)
 		return exitUsage
@@ -97,6 +101,7 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	paths := fs.String("paths", "", "new-token: the paths (patterns) the token is for, separated by commas; none is every path")
 	acts := fs.String("actions", "", "new-token: what the token may do: read, write, delete, promote, admin, separated by commas")
 	note := fs.String("note", "", "new-token: a note for the list of tokens")
+	yes := fs.Bool("yes", false, "reset-seal-key: do it (without it nothing is removed)")
 	// flags may follow the name, as in `new-account ci-build -robot`
 	var rest []string
 	for {
@@ -113,7 +118,19 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "godepot: -fix is for reconcile")
 		return exitUsage
 	}
-	if cmd != "new-account" && cmd != "new-token" && cmd != "set-password" && len(rest) > 0 {
+	if *yes && cmd != "reset-seal-key" {
+		fmt.Fprintln(stderr, "godepot: -yes is for reset-seal-key")
+		return exitUsage
+	}
+	if cmd == "reset-seal-key" && !*yes {
+		fmt.Fprintln(stderr, "godepot reset-seal-key: this removes every password kept in the database (they must be given again); stop the replicas and say -yes to do it")
+		return exitUsage
+	}
+	if cmd == "reseal" && len(rest) != 1 {
+		fmt.Fprintf(stderr, "godepot: reseal takes the path of the new key file\n\n%s", usage)
+		return exitUsage
+	}
+	if cmd != "new-account" && cmd != "new-token" && cmd != "set-password" && cmd != "reseal" && len(rest) > 0 {
 		fmt.Fprintf(stderr, "godepot: %s takes no arguments (it has %q)\n", cmd, rest[0])
 		return exitUsage
 	}
@@ -173,6 +190,14 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stdout, "the password of %s is set\n", rest[0])
 			}
 		}
+	case "reseal":
+		if rerr = a.start(ctx, false); rerr == nil {
+			rerr = a.reseal(ctx, rest[0])
+		}
+	case "reset-seal-key":
+		if rerr = a.start(ctx, false); rerr == nil {
+			rerr = a.resetSealKey(ctx)
+		}
 	case "new-token":
 		if rerr = a.start(ctx, false); rerr == nil {
 			rerr = a.newToken(ctx, rest[0], *life, splitList(*repos), splitList(*paths), splitList(*acts), *note)
@@ -195,25 +220,28 @@ func splitList(s string) []string {
 }
 
 type app struct {
-	cfg   *Config
-	auth  *auth.Store
-	audit *audit.Log
-	srv   *server.Server
-	db    *meta.Rqlite
-	store *blobgate.Store
-	layer *blob.Layer
-	oci   *oci.OCI
-	trash *trash.Trash
-	clean *cleanup.Engine
-	reads *format.ReadLog
-	lease *lease.Lease
+	cfg     *Config
+	secrets *seal.Store
+	auth    *auth.Store
+	audit   *audit.Log
+	srv     *server.Server
+	db      *meta.Rqlite
+	store   *blobgate.Store
+	layer   *blob.Layer
+	oci     *oci.OCI
+	trash   *trash.Trash
+	clean   *cleanup.Engine
+	reads   *format.ReadLog
+	lease   *lease.Lease
 	// lastCleanup is when this replica, as the leader, last ran the policies.
 	lastCleanup time.Time
-	m           *appMetrics
-	reg         *metrics.Registry
-	out         io.Writer
-	errOut      io.Writer
-	log         *slog.Logger
+	// keyWait is how long serve waits, alive and not ready, for a seal key that is not right, before it ends.
+	keyWait time.Duration
+	m       *appMetrics
+	reg     *metrics.Registry
+	out     io.Writer
+	errOut  io.Writer
+	log     *slog.Logger
 }
 
 type appMetrics struct {
@@ -226,7 +254,7 @@ type appMetrics struct {
 
 func newApp(cfg *Config, out, errOut io.Writer) *app {
 	reg := metrics.New()
-	a := &app{cfg: cfg, reg: reg, out: out, errOut: errOut, log: slog.New(slog.NewJSONHandler(errOut, nil))}
+	a := &app{cfg: cfg, reg: reg, keyWait: keyWait, out: out, errOut: errOut, log: slog.New(slog.NewJSONHandler(errOut, nil))}
 	a.m = &appMetrics{
 		passes:     reg.Counter("godepot_collect_passes_total", "Passes of the collector that this replica made while holding the lease.", ""),
 		passErrors: reg.Counter("godepot_collect_errors_total", "Passes of the collector that ended with an error.", ""),
@@ -251,7 +279,8 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 	a.auth = &auth.Store{DB: a.db, MaxLife: cfg.TokenMaxLife}
 	a.audit = &audit.Log{DB: a.db, Log: a.log}
 	gate := format.NewGate(cfg.MaxDownloads, 5*time.Second) // one for every door: what limits is the memory of blobgate
-	pool := &upstream.Pool{DB: a.db, M: a.m.upstream}
+	a.secrets = &seal.Store{DB: a.db}
+	pool := &upstream.Pool{DB: a.db, M: a.m.upstream, Secrets: a.secrets}
 	a.oci = &oci.OCI{Up: pool, Blobs: a.layer, DB: a.db, Audit: a.audit, Reads: a.m.reads, Writes: a.m.writes, Deletes: a.m.deletes, Refused: a.m.refused, Active: a.m.active,
 		Downloads: gate, Rate: int64(cfg.MinRate), UploadTTL: cfg.UploadTTL}
 	a.trash = &trash.Trash{DB: a.db, Blobs: a.layer, Audit: a.audit, Days: cfg.TrashDays}
@@ -273,6 +302,7 @@ func newApp(cfg *Config, out, errOut io.Writer) *app {
 		}
 	}
 	a.srv.Cleanup, a.srv.Trash = a.clean, a.trash
+	a.srv.Secrets, a.srv.CredentialChanged = a.secrets, pool.Forgot
 	a.srv.Settings.Store(&settings.Settings{})
 	var rnd [6]byte
 	_, _ = rand.Read(rnd[:])
@@ -316,6 +346,114 @@ func (a *app) start(ctx context.Context, checkStore bool) error {
 	return nil
 }
 
+// noSealKey is what serve and validate say when no file is named: a default would put the key where nobody keeps it.
+var errNoSealKey = errors.New("GODEPOT_SEAL_KEY_FILE is required: the file of the key that passwords in the database are sealed with; it is made when it is not there, on a disk that lasts (docs/secrets.md)")
+
+// keyWait is the time an operator has to act while a replica with a key that is not right is still there: to run godepot reset-seal-key in its container, or to put the key back.
+const keyWait = 30 * time.Second
+
+// awaitSealKey is openSealKey for serve. A key that is not right does not end the program at once: for keyWait it answers /healthz, says it is not ready, and tries the key again every second.
+// When the key is put right in that time (or the database's key is reset) it goes on; else it ends with the error.
+func (a *app) awaitSealKey(ctx context.Context) error {
+	err := a.openSealKey(ctx)
+	if !errors.Is(err, seal.ErrWrongKey) {
+		return err
+	}
+	a.log.Error("the seal key is not right: waiting before the end", "wait", a.keyWait.String(), "error", err.Error())
+	ln, lerr := net.Listen("tcp", fmt.Sprintf(":%d", a.cfg.Port))
+	if lerr != nil {
+		return errors.Join(err, lerr)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", healthz)
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		notReady(w, "seal_key")
+	})
+	waiting := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = waiting.Serve(ln) }()
+	defer func() { _ = waiting.Close() }()
+	end := time.NewTimer(a.keyWait)
+	defer end.Stop()
+	again := time.NewTicker(time.Second)
+	defer again.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return err
+		case <-end.C:
+			return err
+		case <-again.C:
+			if err = a.openSealKey(ctx); err == nil {
+				a.log.Info("the seal key is right now")
+				return nil
+			}
+		}
+	}
+}
+
+func healthz(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") }
+
+func notReady(w http.ResponseWriter, check string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	fmt.Fprintf(w, `{"checks":{%q:"fail"},"status":"not ready"}`, check)
+}
+
+// openSealKey takes the key of the file for the database, or makes it for a database that has none.
+func (a *app) openSealKey(ctx context.Context) error {
+	if a.cfg.SealKeyFile == "" {
+		return errNoSealKey
+	}
+	key, made, err := seal.Open(ctx, a.db, a.cfg.SealKeyFile, time.Now())
+	if err != nil {
+		return fmt.Errorf("the seal key: %w", err)
+	}
+	if made {
+		a.log.Warn("a new seal key was made: keep a copy of the file, and give every replica the same", "file", a.cfg.SealKeyFile)
+	}
+	a.secrets.Key = key
+	return nil
+}
+
+// reseal seals every secret of the database with the key of another file, which is made when it is not there.
+func (a *app) reseal(ctx context.Context, newFile string) error {
+	if a.cfg.SealKeyFile == "" {
+		return errNoSealKey
+	}
+	// Not openSealKey: a database with no key has nothing to seal again, and no key must be made for it here.
+	old, err := seal.ReadKey(a.cfg.SealKeyFile)
+	if err != nil {
+		return fmt.Errorf("the seal key: %w", err)
+	}
+	next, _, err := seal.MakeKey(newFile)
+	if err != nil {
+		return fmt.Errorf("the new seal key: %w", err)
+	}
+	a.secrets.Key = old
+	n, err := a.secrets.Reseal(ctx, next)
+	if err != nil {
+		return err
+	}
+	a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "seal.reseal", Result: audit.OK, Detail: fmt.Sprintf("%d secrets", n)})
+	fmt.Fprintf(a.out, "%d secrets are sealed with the key of %s: give every replica that file as GODEPOT_SEAL_KEY_FILE and restart it\n", n, newFile)
+	return nil
+}
+
+// resetSealKey is the way back when the key is lost: what was sealed with it cannot be opened by anybody, so it is removed, and the next serve takes a key again.
+func (a *app) resetSealKey(ctx context.Context) error {
+	names, err := a.secrets.Reset(ctx)
+	if err != nil {
+		return err
+	}
+	a.audit.Record(ctx, audit.Event{Actor: "cli", Action: "seal.reset", Result: audit.OK, Detail: strings.Join(names, " ")})
+	fmt.Fprintf(a.out, "the seal key of the database is reset; passwords removed: %d\n", len(names))
+	for _, n := range names {
+		fmt.Fprintf(a.out, "  give again: %s\n", n)
+	}
+	fmt.Fprintln(a.out, "the next serve takes the key of GODEPOT_SEAL_KEY_FILE, and makes one when the file is not there")
+	return nil
+}
+
 // loadSettings reads the settings file (if there is one) and gives it to the server.
 func (a *app) loadSettings() error {
 	if a.cfg.ConfigFile == "" {
@@ -353,6 +491,14 @@ func (a *app) validate(ctx context.Context) error {
 		return fmt.Errorf("the database does not answer: %w", err)
 	}
 	fmt.Fprintln(a.out, "database: ok")
+	if a.cfg.SealKeyFile == "" {
+		return errNoSealKey
+	}
+	state, err := seal.Inspect(ctx, a.db, a.cfg.SealKeyFile)
+	if err != nil {
+		return fmt.Errorf("the seal key: %w", err)
+	}
+	fmt.Fprintln(a.out, "seal key: "+state)
 	if err := a.store.Check(ctx); err != nil {
 		return fmt.Errorf("the store cannot be used: %w", err)
 	}
@@ -392,6 +538,9 @@ func (a *app) serve(ctx context.Context) error {
 	if err := a.start(ctx, true); err != nil {
 		return err
 	}
+	if err := a.awaitSealKey(ctx); err != nil {
+		return err
+	}
 	a.m.up.Set(1)
 	// SIGHUP reads the settings file again; a file that is not right is refused and the settings in use stay.
 	hup := make(chan os.Signal, 1)
@@ -412,14 +561,13 @@ func (a *app) serve(ctx context.Context) error {
 		}
 	}()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
+	mux.HandleFunc("/healthz", healthz)
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		c, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := a.db.Query(c, meta.S("SELECT 1")); err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprint(w, `{"checks":{"database":"fail"},"status":"not ready"}`)
+			notReady(w, "database")
 			return
 		}
 		fmt.Fprint(w, `{"checks":{"database":"ok"},"status":"ready"}`)

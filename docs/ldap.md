@@ -20,13 +20,17 @@ The name matters for an authority because it signs for many machines: without th
 
 Without a given certificate (the machine's own list of authorities) the name is always checked.
 
-The password of the service account comes from an environment variable of godepot, never from the settings file:
+The password of the service account is never in the settings file. Give it to godepot with the API once it runs (step 4 needs it), and it is kept sealed in the database ([secrets.md](secrets.md)):
 
 ```bash
-export GODEPOT_LDAP_PASSWORD='the password of the service account'
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT -H "Authorization: Bearer $TOKEN" --data-binary @ldap-password localhost:18100/api/v1/credentials/ldap
 ```
 
-Better, give a file that holds it, which godepot reads at each use, so that a new password needs no restart ([configuration.md](configuration.md)). Set one of the two, not both:
+```
+204
+```
+
+Or name a variable with `password_env` in the settings (as `GODEPOT_LDAP_PASSWORD` below) and set it, or better its `_FILE` form with the path of a file that holds the password; one of the two, not both:
 
 ```bash
 export GODEPOT_LDAP_PASSWORD_FILE=/run/secrets/ldap-password
@@ -134,11 +138,12 @@ The answer says little. The audit log has the reason: `GET /api/v1/audit?action=
 | `503` | `... certificate has expired or is not yet valid` | a new certificate on the server (give it to godepot if it is self-signed); look at the clocks |
 | `503` | `... certificate is valid for ..., not ...`, `... doesn't contain any IP SANs` or `... legacy Common Name field ...` | the certificate lacks the name: with a `ca.crt` use in `url` a name it has, or set `server_name`; or give the server's own certificate instead |
 | `503` | `the bind of the service account: ...` | `bind_dn` or the password variable; Active Directory refuses a bind without TLS |
-| `503` | `... has no password (the environment variable or its file is empty)` | set the variable that `password_env` names and restart, or write the password into the file of `NAME_FILE` |
+| `503` | `... has no password (none is kept, or the variable or its file is empty)` | give it with `PUT /api/v1/credentials/ldap`; or, with `password_env`, set the variable and restart, or write the password into the file of `NAME_FILE` |
 | `503` | `the password of the service account cannot be read: ...` | the file that `NAME_FILE` names is missing or cannot be read by godepot, or both `NAME` and `NAME_FILE` are set |
 
 ## Checked
 
+- 2026-11-28, the password of the service account **kept in the database** was run against the false directory only (`internal/server/credentials_test.go`), as was the `curl` command above: not against a real one.
 - 2026-11-28, the password of the service account **in a file** (`L_BIND_PW_BY_FILE=1`): Active Directory (LDAPS) and AD LDS (StartTLS) passed the script. A new password in the file with no restart was run against the false directory only (`internal/server/ldap_test.go`).
 - 2026-11-27, `tools/test/ldap-run.sh` ([testing.md](testing.md)) against Windows Server 2025: **Active Directory** (LDAPS) and **AD LDS** (LDAPS and StartTLS): login, grants by group, groups inside groups (AD), disabled and expired-password users not let in, no secret in the log.
 - 2026-11-27, the same script with `L_CA_BY_API=1`: a self-signed `server.crt` (AD LDS, LDAPS and StartTLS) and the `ca.crt` of Active Directory, each given with `PUT /api/v1/ldap/ca`. The answers shown in step 3 are of a certificate made with `openssl` for this page.

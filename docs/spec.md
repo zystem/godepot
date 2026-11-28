@@ -82,7 +82,7 @@ Each has a number so that the plan and the tests can name it. "Must" is needed f
 - **S3** The record in the database is the commit, as in blobgate: a blob with no reference is a stray and is removed; a reference with no blob cannot exist, because the reference is written after the blob is checked. (must)
 - **S4** Space is freed by one mechanism with no task to schedule: when the last reference goes, the blob is queued; after a grace time (default 24 hours, so that a push in progress that is about to name it is safe) it is deleted from blobgate. The collector runs while the service serves. (must)
 - **S5** Small documents that change (an npm packument, a `maven-metadata.xml`, an index page) are rows in the database, not blobs, up to 256 KiB; above that they are blobs. Nodes that are slow with many small files (FTP) are then not asked for them. (must)
-- **S6** godepot writes nothing to a local disk and runs with a read-only root. (must)
+- **S6** godepot writes nothing to a local disk but the seal key, once (O1), and runs with a read-only root. (must)
 - **S7** A download may be answered with a redirect to a presigned address of blobgate's S3 door, so that the bytes do not pass through godepot. Off by default; it needs the S3 door reachable by clients. (should)
 
 ### The database
@@ -111,7 +111,7 @@ Each has a number so that the plan and the tests can name it. "Must" is needed f
 - **P5** If an upstream gives other bytes for a version that is cached and cannot change, the cached bytes stay, the event is written to the audit log and a metric counts it. (must)
 - **P6** Cooldown: a version that the upstream published less than `cooldown` ago (default `0`, recommended 7 days for npm and PyPI) is left out of the indexes godepot serves and is refused by name, with a message that says when it will be served. An allow list lifts it per name. The publish time is the upstream's own (`time` in a packument, `upload-time` in PyPI, `Last-Modified` otherwise). (must)
 - **P7** Block and allow lists per proxy repository: names, version ranges, and digests. (must)
-- **P8** An upstream has its own credentials (sealed in the database), its own limits (requests per second, at once), and its own trust: `verify` says what is checked (the digest the upstream names, a signature where the format has one). Credentials are never sent after a redirect to another host. (must)
+- **P8** An upstream has its own credentials (sealed in the database under the seal key, or taken from a variable or file the settings name), its own limits (requests per second, at once), and its own trust: `verify` says what is checked (the digest the upstream names, a signature where the format has one). Credentials are never sent after a redirect to another host. (must)
 - **P9** The address of an upstream is set by the operator only. A fetch refuses private and link-local addresses after resolving the name, unless the upstream says `allow_private: true`. (must)
 - **P10** A scanner is a program godepot calls with a blob (or to which it gives a presigned address) and that answers with a report; a policy maps the report to "serve", "warn" or "refuse". A scanner that is down: the policy says `fail_open` or `fail_closed` (default open for cached content, closed for new). (should)
 - **P11** Downloads of blobs going on at once are limited (a setting; the default is chosen from the memory of blobgate, about 10 MiB for each), a download over the limit waits for a short time and then gets 503 with `Retry-After`, and a download that goes slower than a minimum rate for a time is ended. (must)
@@ -159,7 +159,7 @@ A format is done when the real client passes the conformance script of the plan 
 
 ### Operation
 
-- **O1** Settings are a file (repositories, upstreams, policies, roles, the trust of issuers), checked by `godepot validate`, read at start and on `SIGHUP`; the same things can be read by API. Secrets come from files or the environment, never from the settings file. The web pages change nothing. (must)
+- **O1** Settings are a file (repositories, upstreams, policies, roles, the trust of issuers), checked by `godepot validate`, read at start and on `SIGHUP`; the same things can be read by API. Secrets come from files or the environment, never from the settings file. What godepot shows to others (upstreams, the directory) may also be given with the API; it is then sealed in the database under the seal key, a file that godepot makes when there is none and the database has no key yet; a lost key is answered by a command that forgets the sealed secrets so that they can be given again. The web pages change nothing. (must)
 - **O2** Any number of replicas; none is special for clients. Background work is done by the replica that holds a lease in the database. (must)
 - **O3** The service serves TLS itself and works with no reverse proxy in front; the page for a reverse proxy says the three settings that matter (body size without limit, no buffering of bodies, timeouts). (must)
 - **O4** Prometheus metrics for every door, every upstream (latency, errors, stale answers, cooldown refusals), the collector, the cache; `/healthz`, `/readyz`. (must)

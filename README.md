@@ -19,7 +19,7 @@ Do not use it when one format on one disk is enough (a plain registry, or a stat
             │
             ▼
  ┌─────────────────────────────────────────────┐
- │ godepot (any number of replicas, stateless)  │
+ │ godepot (any number of replicas, stateless)  │ ◀─ the seal key (one file, the same for all)
  │  accounts, tokens, audit; the six formats    │
  │  blob layer: bytes by digest, references     │
  │  collector (one replica at a time: a lease)  │
@@ -64,7 +64,7 @@ cat > godepot.json <<'EOF'
   "grants": [{"account": "ci-build", "repositories": ["files"], "actions": ["read", "write"]}]
 }
 EOF
-G="docker run --rm --network host --read-only -v $PWD/godepot.json:/godepot.json:ro -e GODEPOT_CONFIG_FILE=/godepot.json -e GODEPOT_RQLITE_URL=http://127.0.0.1:4011 -e GODEPOT_BLOBGATE_URL=http://127.0.0.1:18090 -e GODEPOT_BLOBGATE_TENANT=godepot -e GODEPOT_BLOBGATE_SECRET=a-godepot-secret-16-chars -e GODEPOT_BLOBGATE_STORE=main godepot"
+G="docker run --rm --network host --read-only -v $PWD/godepot.json:/godepot.json:ro -e GODEPOT_CONFIG_FILE=/godepot.json -e GODEPOT_RQLITE_URL=http://127.0.0.1:4011 -e GODEPOT_BLOBGATE_URL=http://127.0.0.1:18090 -e GODEPOT_BLOBGATE_TENANT=godepot -e GODEPOT_BLOBGATE_SECRET=a-godepot-secret-16-chars -e GODEPOT_BLOBGATE_STORE=main -v godepot-key:/var/lib/godepot -e GODEPOT_SEAL_KEY_FILE=/var/lib/godepot/seal.key godepot"
 $G validate
 ```
 
@@ -72,6 +72,7 @@ $G validate
 settings: ok
 settings file: ok (1 repositories, 1 grants)
 database: ok
+seal key: not made yet (serve makes it)
 store: ok
 ```
 
@@ -85,7 +86,7 @@ cat token.err
 ```
 
 ```
-the schema of the database is at version 8
+the schema of the database is at version 9
 account ci-build (robot) made
 token 31b258b6a231 for ci-build, valid until 2026-11-28T23:22:33Z. This is the only time it is shown; it is not kept.
 ```
@@ -97,7 +98,7 @@ Run it, and write, read and list a file:
 ```bash
 docker run -d --name godepot --network host --read-only -v $PWD/godepot.json:/godepot.json:ro -e GODEPOT_CONFIG_FILE=/godepot.json -e GODEPOT_RQLITE_URL=http://127.0.0.1:4011 \
   -e GODEPOT_BLOBGATE_URL=http://127.0.0.1:18090 -e GODEPOT_BLOBGATE_TENANT=godepot -e GODEPOT_BLOBGATE_SECRET=a-godepot-secret-16-chars -e GODEPOT_BLOBGATE_STORE=main \
-  -e GODEPOT_METRICS_PORT=18101 godepot serve
+  -v godepot-key:/var/lib/godepot -e GODEPOT_SEAL_KEY_FILE=/var/lib/godepot/seal.key -e GODEPOT_METRICS_PORT=18101 godepot serve
 sleep 5
 echo hello > hello.txt
 curl -s -u x:$TOKEN -X PUT --data-binary @hello.txt -H "Content-Type: text/plain" localhost:18100/repository/files/docs/hello.txt
@@ -145,7 +146,7 @@ would remove (dry: nothing was changed, use -fix) 0 keys that nothing names
 
 Two blobs, not one: the bytes of the refused write (`bye`) were taken in and are kept until the grace time (24 hours) has passed, in case a client was about to name them; then the collector removes them.
 
-Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown. The outputs are the ones that run printed, except the lines said above to be cut, and the token and its id, which are different every time; the `created_at` and the end date are those of that run. Not run by a test: a test that runs this page is still to do. Remove it all with `docker rm -f godepot blobgate bg-rq gd-rq`.
+Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown. The outputs are the ones that run printed, except the lines said above to be cut, and the token and its id, which are different every time; the `created_at` and the end date are those of that run. Not run by a test: a test that runs this page is still to do. Remove it all with `docker rm -f godepot blobgate bg-rq gd-rq && docker volume rm godepot-key`.
 
 **Next:** [docs/proxy-howto.md](docs/proxy-howto.md) (a proxy of Docker Hub and a group), [docs/oci-clients.md](docs/oci-clients.md) (the same account and token push images and charts), [docs/raw.md](docs/raw.md) (every request of the format), [docs/access.md](docs/access.md) (accounts, scopes: why it is so), [docs/api.md](docs/api.md) (the API, the audit log).
 
@@ -155,7 +156,7 @@ Run on 2026-11-28 with the image of this repository and blobgate 0.6.1, as shown
 |---|---|---|
 | `docker run ghcr.io/zystem/godepot:0.7.1` | production, tests | the published image (amd64, arm64), signed: [docs/verifying-releases.md](docs/verifying-releases.md); the git tags are not signed |
 | the archive of a [release](https://github.com/zystem/godepot/releases) | production without containers | the program for linux/amd64 and linux/arm64, signed, from 0.7.1 |
-| `docker build .` | tests, the try-it | a static program in an image with no shell, user 65532, a read-only root; nothing is written to a disk |
+| `docker build .` | tests, the try-it | a static program in an image with no shell, user 65532, a read-only root; the one thing written to a disk is the seal key, on a volume at `/var/lib/godepot` |
 | `go build ./cmd/godepot` (Go 1.26) | a workstation, changes | |
 | a chart | production | **not built yet** |
 

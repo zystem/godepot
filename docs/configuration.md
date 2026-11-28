@@ -1,6 +1,6 @@
 # Configuration
 
-Reference. The environment variables and the commands of the program as they are in this release (2026-11-28). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A proxy repository and the directory may also read the variables that the settings file names (`password_env`, `token_env`: [settings-file.md](settings-file.md)). A change of a variable needs a **restart** of the replica; a change of the settings file needs a restart or a `SIGHUP`.
+Reference. The environment variables and the commands of the program as they are in this release (2026-11-28). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. The passwords of upstreams and of the directory are given with the API and sealed in the database ([secrets.md](secrets.md)); a proxy repository and the directory may instead read the variables that the settings file names (`password_env`, `token_env`: [settings-file.md](settings-file.md)). A change of a variable needs a **restart** of the replica; a change of the settings file needs a restart or a `SIGHUP`.
 
 ## Settings
 
@@ -14,6 +14,7 @@ A secret may be given as `NAME` or as `NAME_FILE` (the path of a file whose cont
 | `GODEPOT_BLOBGATE_URL` | **required** | The blobgate that keeps the bytes (`http://host:18090`). |
 | `GODEPOT_BLOBGATE_TENANT` | **required** | The tenant of blobgate that godepot writes as. One instance of godepot is one tenant; two instances share nothing when they have two. |
 | `GODEPOT_BLOBGATE_SECRET`, `GODEPOT_BLOBGATE_SECRET_FILE` | **required** (at least 16 characters) | The secret of that tenant (blobgate's `BLOBGATE_TENANTS`). |
+| `GODEPOT_SEAL_KEY_FILE` | **required** by `serve` and `validate` | The file of the key that passwords in the database are sealed with. Made when it is not there and the database has no key yet; after that only the same key is taken. On a disk that lasts, the same for every replica, with a copy kept away from the database's backup ([secrets.md](secrets.md)). Read at start. A key that is not right is waited for 30 seconds before the program ends ([secrets.md](secrets.md#time-to-act)). |
 | `GODEPOT_BLOBGATE_STORE` | `_default` | The store of blobgate that holds the bytes (`_default` is the one marked default). It must be set to `dedup: "tenant"`: godepot makes the key of a blob from the bytes of an upload by a link, and `validate` and `serve` stop with a message when the store cannot link. |
 | `GODEPOT_PORT` | `18100` | The port of everything but `/metrics`: `/healthz`, `/readyz`, the repositories (`/repository/...`, [raw.md](raw.md); `/v2/...`, [oci.md](oci.md)) and the API (`/api/v1/...`, [api.md](api.md)). Plain HTTP; TLS is not served yet, so put it behind a proxy that does, or on a network no one else can reach: **tokens are sent in the clear otherwise**. |
 | `GODEPOT_CONFIG_FILE` | none | The path of the settings file ([settings-file.md](settings-file.md)). With none, no repository is served and only the API of accounts answers. A file that is not right stops `serve` and `validate`; on `SIGHUP` it is read again and a file that is not right is refused (the settings in use stay, an error is logged). |
@@ -43,9 +44,11 @@ A wrong value is refused at start with every problem named at once.
 | `godepot new-account NAME` | Makes an account (after bringing the schema up to date). `-robot` makes a robot, not a user; `-admin` makes an admin account. The name is 1 to 63 of `a-z 0-9 . _ -`, no `$`. An account has no password: it gets in with tokens. This is how the first admin is made, since the API needs a token. |
 | `godepot set-password NAME` | Sets the password of a **user** account (a robot has none). The password is the **first line of the standard input**, never an argument (an argument is in the list of processes and in the history of the shell): `printf '%s\n' "$PW" \| godepot set-password alice`. 12 to 128 bytes. Writes the audit log (`password.set`). It prints `the password of alice is set` ([api.md](api.md)). |
 | `godepot new-token ACCOUNT` | Makes a token for the account and prints **only the token** on the standard output (the rest, including the end date, goes to the standard error). It is shown once and not kept. `-life` (required, like `720h`, at most `GODEPOT_TOKEN_MAX_DAYS`), `-repositories` and `-actions` (required, comma separated), `-paths` (patterns, none is every path), `-note`. One scope per call; the API makes tokens with more than one. |
+| `godepot reseal NEWFILE` | Seals every password of the database with the key of `NEWFILE` (made when it is not there), in one transaction, with the key of `GODEPOT_SEAL_KEY_FILE`. Then every replica needs the new file and a restart. Audit: `seal.reseal` ([secrets.md](secrets.md)). |
+| `godepot reset-seal-key -yes` | For a lost key: removes every sealed password and the check value of the key, and prints the names to give again. Everything else stays. Without `-yes` nothing is done. Stop the replicas first. Audit: `seal.reset` ([secrets.md](secrets.md)). |
 | `godepot version` | Prints the version. |
 
-`-fix` is for `reconcile` only. `-robot` and `-admin` are for `new-account`; `-life`, `-repositories`, `-paths`, `-actions` and `-note` are for `new-token`. Both commands write the audit log (the actor is `cli`).
+`-fix` is for `reconcile` only, `-yes` for `reset-seal-key` only. `-robot` and `-admin` are for `new-account`; `-life`, `-repositories`, `-paths`, `-actions` and `-note` are for `new-token`. Both commands write the audit log (the actor is `cli`).
 
 ## Exit codes
 
@@ -63,7 +66,7 @@ A wrong value is refused at start with every problem named at once.
 | `/repository/<repository>/<path>` | the files of a repository: [raw.md](raw.md) |
 | `/api/v1/...` | accounts, tokens, the audit log, the settings: [api.md](api.md) |
 | `GET /healthz` | `ok` while the process runs |
-| `GET /readyz` | `{"checks":{"database":"ok"},"status":"ready"}`, or 503 with `"database":"fail"` |
+| `GET /readyz` | `{"checks":{"database":"ok"},"status":"ready"}`, or 503 with `"database":"fail"`, or with `"seal_key":"fail"` while a replica waits for the right seal key |
 | `GET /metrics` (on `GODEPOT_METRICS_PORT` only) | [metrics.md](metrics.md) |
 
 The formats served are `raw`, `oci`, `go`, `pypi`, `npm` and `maven` ([settings-file.md](settings-file.md)).

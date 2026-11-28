@@ -50,12 +50,15 @@ All of `/api/v1/` needs a token (`401` without), except `login`, `password` and 
 | `PUT /api/v1/ldap/ca` (the body is PEM text, not JSON) | admin | trust these certificates for the directory, in place of those given before: a `ca.crt`, or a self-signed `server.crt`; the name is not checked when the server shows exactly one of them ([ldap.md](ldap.md)). `200` with `{"certificates": [{"subject", "issuer", "sha256", "not_before", "not_after"}]}`. `400` for anything but certificates (a private key above all), an ended one, or more than 64 KiB |
 | `GET /api/v1/ldap/ca` | admin | `{"certificates": [...], "pem", "set_by", "set_at"}`; only `{"certificates": []}` when none was given |
 | `DELETE /api/v1/ldap/ca` | admin | forget them, `204` |
+| `PUT /api/v1/credentials/upstream/<repository>`, `PUT /api/v1/credentials/ldap` (the body is the password or token itself, not JSON) | admin | keep it, sealed, in place of the one before; line breaks at its end are taken off. `204`. `400` for an empty one, more than one line or more than 8 KiB; `404` when the settings have no such proxy repository or no `ldap` section; `409` when the settings name `password_env` or `token_env` for it; `503` when this replica has an old seal key ([secrets.md](secrets.md)) |
+| `DELETE /api/v1/credentials/<the same name>` | admin | forget it, `204` |
+| `GET /api/v1/credentials` | admin | `{"items": [{"name", "set_by", "set_at"}]}`; **no call tells a secret** |
 
 "Admin" means an admin account **and** a token whose scope has the action `admin` on repository `*`.
 
 ## The audit log
 
-One line in the log (JSON on the standard error, message `audit`) and one row in the database for every **write, delete, refusal** (`401` and `403` included, with the account and the token id when there were any), **account and token change**, each change of the directory's trusted certificates (action `ldap.ca.set`, with their SHA-256), and each **`new-account` and `new-token`** (actor `cli`). The fields: `actor`, `token`, `remote` (the address the connection came from; a reverse proxy's `X-Forwarded-For` is **not** trusted), `action`, `repo`, `path`, `result` (`ok`, `refused`), `detail` (why, or the digest and size).
+One line in the log (JSON on the standard error, message `audit`) and one row in the database for every **write, delete, refusal** (`401` and `403` included, with the account and the token id when there were any), **account and token change**, each change of the directory's trusted certificates (action `ldap.ca.set`, with their SHA-256), each password kept or forgotten (`credential.set`, `credential.delete`, with the name, never the secret; a refusal of the list is `credential.list`), `seal.reseal` and `seal.reset` of the commands, and each **`new-account` and `new-token`** (actor `cli`). The fields: `actor`, `token`, `remote` (the address the connection came from; a reverse proxy's `X-Forwarded-For` is **not** trusted), `action`, `repo`, `path`, `result` (`ok`, `refused`), `detail` (why, or the digest and size).
 
 - The row of a write or a delete is written **in the same transaction** as the change. The row of a refusal, of an account and of a token is written after the thing it describes, by itself.
 - Reads are not audited (they are counted: [metrics.md](metrics.md)).

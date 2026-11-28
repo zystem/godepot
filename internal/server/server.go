@@ -21,6 +21,7 @@ import (
 	"github.com/zystem/godepot/internal/ldapauth"
 	"github.com/zystem/godepot/internal/metrics"
 	"github.com/zystem/godepot/internal/oidc"
+	"github.com/zystem/godepot/internal/seal"
 	"github.com/zystem/godepot/internal/settings"
 	"github.com/zystem/godepot/internal/trash"
 )
@@ -34,6 +35,10 @@ type Server struct {
 	// Cleanup runs the policies of the repositories and Trash holds what they and people remove (docs/spec.md, C1 to C3); nil: the calls that need them answer 404.
 	Cleanup *cleanup.Engine
 	Trash   *trash.Trash
+	// Secrets keeps the passwords of the directory and of upstreams that were given with the API; nil: the calls that need it answer 404.
+	Secrets *seal.Store
+	// CredentialChanged is told the repository whose upstream credential was changed here.
+	CredentialChanged func(repo string)
 	// LoginLife is how long a token that a login makes lives when the login does not say (default 12 hours).
 	LoginLife time.Duration
 	// OIDC checks the signed tokens of CI jobs and keeps the keys of their issuers; the zero value is ready.

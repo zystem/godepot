@@ -210,7 +210,7 @@ func TestTheDirectoryAndItsGroups(t *testing.T) {
 		text(good+`, "start_tls": true`, ""):                                                                           "start_tls is for an ldap url",
 		text(strings.Replace(good, "dc.test", "u@dc.test", 1), ""):                                                     "a user name",
 		text(`"url": "ldaps://dc.test"`, ""):                                                                           "bind_dn is required",
-		text(strings.Replace(good, `"P"`, `"a b"`, 1), ""):                                                             "password_env is required",
+		text(strings.Replace(good, `"P"`, `"a b"`, 1), ""):                                                             "password_env names an environment variable",
 		text(strings.Replace(good, "{user}", "bob", 1), ""):                                                            "no {user}",
 		text(good+`, "group_base": "x", "group_filter": "(cn=all)"`, ""):                                               "neither {dn} nor {user}",
 		text(good+`, "group_name": "cn"`, ""):                                                                          "need group_base",

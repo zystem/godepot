@@ -55,7 +55,6 @@ func TestProxyAndGroupRefuse(t *testing.T) {
 		"a proxy with no upstream":      `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy"}]}`,
 		"an upstream that is no url":    `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "registry"}}]}`,
 		"an upstream with a password":   `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "https://u:p@x.example"}}]}`,
-		"a user with no password":       `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "https://x.example", "username": "u"}}]}`,
 		"a password with no user":       `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "https://x.example", "password_env": "P"}}]}`,
 		"both a password and a token":   `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "https://x.example", "username": "u", "password_env": "P", "token_env": "T"}}]}`,
 		"an env name that is a secret":  `{"repositories": [{"name": "a", "format": "raw", "kind": "proxy", "upstream": {"url": "https://x.example", "token_env": "has space"}}]}`,

@@ -53,7 +53,7 @@ start)
   plain='":local:/data/p1"'; [ -n "${BLOBGATE_IMAGE:-}" ] || plain="\":local:$dir/p1\""
   curl -sf -X PUT "http://127.0.0.1:$port/v1/admin/stores/plain" -H "Authorization: Bearer $admin" \
     -d "{\"kind\":\"mirror\",\"nodes\":[{\"remote\":$plain}]}" >/dev/null
-  echo "export GODEPOT_RQLITE_URL=http://127.0.0.1:$rq GODEPOT_BLOBGATE_URL=http://127.0.0.1:$port GODEPOT_BLOBGATE_TENANT=$tenant GODEPOT_BLOBGATE_SECRET=$secret GODEPOT_BLOBGATE_STORE=main"
+  echo "export GODEPOT_RQLITE_URL=http://127.0.0.1:$rq GODEPOT_BLOBGATE_URL=http://127.0.0.1:$port GODEPOT_BLOBGATE_TENANT=$tenant GODEPOT_BLOBGATE_SECRET=$secret GODEPOT_BLOBGATE_STORE=main GODEPOT_SEAL_KEY_FILE=$dir/seal.key"
   ;;
 kill-blobgate) # kill -9 of the program (the stand of the program, not the image), as a power cut would
   kill -9 "$(cat "$dir/pid")"

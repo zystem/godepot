@@ -4,7 +4,11 @@ All notable changes. The form is that of [Keep a Changelog](https://keepachangel
 
 ## [Unreleased]
 
+### Changed
+* **`serve` and `validate` need `GODEPOT_SEAL_KEY_FILE`**: the file of the key that passwords in the database are sealed with, made at the first start. Keep it on a disk that lasts and keep a copy ([docs/secrets.md](docs/secrets.md)). The schema is 9.
+
 ### Added
+* The passwords of upstreams and of the directory can be given with the API (`PUT /api/v1/credentials/...`) and are kept sealed in the database; `godepot reseal` moves them to another key, `godepot reset-seal-key` gets back to work when the key is lost ([docs/secrets.md](docs/secrets.md)).
 * The passwords and tokens that `password_env` and `token_env` name (upstreams, the directory) may be in a file, `NAME_FILE`; a new one in the file is used with no restart ([docs/configuration.md](docs/configuration.md)).
 * The project's documents: [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [GOVERNANCE.md](GOVERNANCE.md), the security requirements, threat model, assurance case and policies; dependency review and a sign-off check on pull requests.
 

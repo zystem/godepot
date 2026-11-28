@@ -30,7 +30,8 @@ Explanation. The assets, who may attack, what answers it and what is left. Made 
 | The main port: the formats under `/repository/` and `/v2/`, the API under `/api/v1/` | anyone on the network | authentication on every request; without a token only what `anonymous_read` allows; `login`, `password`, `oidc/token` take their credential in the body; body limits |
 | The metrics port (off by default) | anyone who reaches it | read only; no authentication |
 | Outgoing: upstreams, JWKS of issuers, the directory, rqlite, blobgate | — | see the table above |
-| The settings file and the environment | the operator | checked as a whole; secrets are named by variables, not written in the file |
+| The settings file and the environment | the operator | checked as a whole; secrets are not written in the file: they are sealed in the database or named by variables |
+| The seal key file (`GODEPOT_SEAL_KEY_FILE`) | the operator; the program makes it, mode 0600 | with the database it opens the sealed passwords: keep its copy apart from the database's backup |
 | Build and release | who can push or tag | CI, one release workflow, signatures |
 
 **The most critical code**: the permission check (`internal/auth`, `internal/settings`), the verification of signed tokens (`internal/oidc`), the directory login (`internal/ldapauth`), the upstream client (`internal/upstream`), and the references that keep and free bytes (`internal/blob`).
