@@ -5,6 +5,7 @@
 #   L_CA         the certificate to trust (PEM): that of the authority (ca.crt) or the server's own (server.crt)
 #   L_CA_BY_API  1: the certificate is not named in the settings but given to the program with PUT /api/v1/ldap/ca (it is removed at the end)
 #   L_SERVER_NAME  a name the certificate must have (optional; with a ca.crt it is needed when the URL has a name or address the certificate lacks)
+#   L_BIND_PW_BY_FILE=1: the program is given that password in a file (L_BIND_PW_FILE), not in its environment
 #   L_BIND_DN    the service account                  L_BIND_PW      its password
 #   L_USER_BASE, L_USER_FILTER (with {user}; it must not take disabled people), L_GROUP_BASE, L_GROUP_FILTER (optional)
 #   L_USER, L_PW     a person and their password      L_GROUP        a group the person is in (directly, or through others when the filter follows them)
@@ -36,10 +37,16 @@ print(json.dumps({"repositories": [{"name": repo, "format": "raw", "kind": "host
   {"group": e("L_GROUP"), "repositories": [repo], "paths": ["mine/**"], "actions": ["read", "write"]},
   {"group": e("L_OTHER_GROUP"), "repositories": [repo], "paths": ["theirs/**"], "actions": ["read", "write"]}]}))
 PY
+if [ "${L_BIND_PW_BY_FILE:-}" = 1 ]; then
+  (umask 077; printf '%s\n' "$L_BIND_PW" >"$work/bind-password")
+  secret=(env -u L_BIND_PW "L_BIND_PW_FILE=$work/bind-password")
+else
+  secret=(env)
+fi
 export GODEPOT_CONFIG_FILE="$work/settings.json" GODEPOT_PORT=$port GODEPOT_METRICS_PORT=$mport
 "$work/godepot" validate >"$work/validate.log" 2>&1 || { cat "$work/validate.log"; exit 1; }
 "$work/godepot" migrate >/dev/null || exit 1
-"$work/godepot" serve >"$work/serve.log" 2>&1 &
+"${secret[@]}" "$work/godepot" serve >"$work/serve.log" 2>&1 &
 pid=$!
 for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/healthz" && break; sleep 0.2; done
 report() { printf '%-9s %-8s %s\n' "$1" "$2" "$3"; [ "$2" = ok ] || fail=1; }

@@ -48,8 +48,8 @@ Accounts and tokens are **not** in the file: they are made while the program run
 |---|---|---|
 | `url` | **required** | The address of the registry: its origin, and a path when it has one (`https://registry-1.docker.io`, `https://example.com/files`). `http` or `https`; no user name, query or fragment in it. Only you set it: it is never taken from a request (P9). |
 | `username` | none | The user name for basic authentication; needs `password_env`. |
-| `password_env` | none | The **name of an environment variable** that holds the password. The password is never in the file. godepot refuses to use the repository (`502`) when the variable is not set, instead of asking with no credentials. |
-| `token_env` | none | The name of an environment variable that holds a bearer token, sent as `Authorization: Bearer`. Not with `password_env`. |
+| `password_env` | none | The **name of an environment variable** that holds the password, say `NAME`; or `NAME_FILE` names a file that holds it ([configuration.md](configuration.md)). The password is never in the settings file. godepot refuses to use the repository (`502`) when neither gives a password, both are set, or the file cannot be read, instead of asking with no credentials. A new password in the file is used by the next request, with no restart. |
+| `token_env` | none | The name of an environment variable that holds a bearer token, sent as `Authorization: Bearer`; or its file, `NAME_FILE`, as for `password_env`. Not with `password_env`. |
 | `token_hosts` | none | Hosts, besides the upstream's own, that may be sent the credentials when the upstream answers `401` and names them as its token service (Docker Hub: `auth.docker.io`). With none, a token service on another host is asked with no credentials: an anonymous token, which is what Docker Hub gives for public images. Credentials are never sent after a redirect to another host. |
 | `file_hosts` | none | Hosts, besides the upstream's own, that an index of the upstream may name for its files (PyPI: `files.pythonhosted.org`; npm: a host that the packument names for tarballs, when it is not the upstream's own). A file on any other host is not fetched. They are never sent credentials. |
 | `cooldown` | none | For a proxy of the format `npm`, `pypi` or `go`. A version that the upstream published less than this long ago (a string of Go: `168h` is 7 days) is **left out of the indexes this repository serves and refused by name** (`403`, with the time when it will be served) ([policy.md](policy.md)). Where the upstream gives no time for a version it is held back too. Not for `oci`, `maven`, `raw`. |
@@ -91,7 +91,7 @@ Which job may become which robot. A trust is tried in the order of the file; the
 
 ## `ldap`
 
-The directory people log in with ([ldap.md](ldap.md)). With none, only local accounts have passwords. Read again on `SIGHUP`; the environment variable is read at each use.
+The directory people log in with ([ldap.md](ldap.md)). With none, only local accounts have passwords. Read again on `SIGHUP`; the password (variable or file) is read at each use.
 
 | Word | Default | Meaning |
 |---|---|---|
@@ -100,7 +100,7 @@ The directory people log in with ([ldap.md](ldap.md)). With none, only local acc
 | `ca_file` | the system's | A PEM file with certificates to trust: an authority's, or a self-signed server's own. They may also be given through the API (`PUT /api/v1/ldap/ca`, [ldap.md](ldap.md)), with no file. With either, **only** those are trusted. |
 | `server_name` | the host of `url` | A name the server's certificate must have. Not needed when the server shows exactly a certificate you gave (`ca_file` or the API): then the name is checked only if this is set ([ldap.md](ldap.md)). |
 | `bind_dn` | **required** | The service account that searches. It needs to read only. |
-| `password_env` | **required** | The **name of an environment variable** with its password. |
+| `password_env` | **required** | The **name of an environment variable** with its password, say `NAME`; or `NAME_FILE` names a file with it. The file is read at each use of the directory, so a new password needs no restart. |
 | `user_base` | **required** | Where people are searched (the whole subtree). |
 | `user_filter` | **required** | An LDAP filter with `{user}` (the name that logs in, escaped). It must find one entry, and **should not find disabled people**. |
 | `group_base` | none: no groups | Where groups are searched. Grants for `group` need it. |

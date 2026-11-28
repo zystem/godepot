@@ -1,10 +1,12 @@
 # Configuration
 
-Reference. The environment variables and the commands of the program as they are in this release (2026-11-28). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A proxy repository may also read the variables that its `upstream` names in the settings file (`password_env`, `token_env`: [settings-file.md](settings-file.md)); they are read when the repository is first used and again after a `SIGHUP` that changes its upstream. A change of a variable needs a **restart** of the replica; a change of the file needs a restart or a `SIGHUP`.
+Reference. The environment variables and the commands of the program as they are in this release (2026-11-28). The repositories and who may do what in them are in a file, [settings-file.md](settings-file.md), that the environment names. A proxy repository and the directory may also read the variables that the settings file names (`password_env`, `token_env`: [settings-file.md](settings-file.md)). A change of a variable needs a **restart** of the replica; a change of the settings file needs a restart or a `SIGHUP`.
 
 ## Settings
 
-A secret may be given as `NAME` or as `NAME_FILE` (the path of a file whose contents, without the last line break, are the secret). Setting both is an error. A file is the better way: the value is then not in the environment of the process.
+A secret may be given as `NAME` or as `NAME_FILE` (the path of a file whose contents, without the last line break, are the secret). Setting both is an error. A file is the better way: the value is then not in the environment of the process. This holds for `GODEPOT_BLOBGATE_SECRET` and for every name that `password_env` or `token_env` gives in the settings file.
+
+**Changing a secret.** The secret of blobgate is read at start: **restart** the replica. The password of the directory and the credentials of an upstream that are in a file are read again at each use: write the new file (replace it in one step, say with `mv`, so that half a password is never read) and the next request takes it, with no restart. A password that godepot has just checked at the directory is still taken for up to 5 minutes, as before.
 
 | Variable | Default | Meaning |
 |---|---|---|

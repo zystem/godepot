@@ -15,6 +15,7 @@ import (
 	"github.com/zystem/godepot/internal/audit"
 	"github.com/zystem/godepot/internal/auth"
 	"github.com/zystem/godepot/internal/ldapauth"
+	"github.com/zystem/godepot/internal/secret"
 	"github.com/zystem/godepot/internal/settings"
 )
 
@@ -71,8 +72,12 @@ func (s *Server) ldapConfig(ctx context.Context, l *settings.LDAP) (ldapauth.Con
 	if err != nil {
 		return ldapauth.Config{}, err
 	}
+	// Read at each use too: a new password in the file of NAME_FILE needs no restart.
+	password, err := secret.Read(os.Getenv, l.PasswordEnv)
+	// A password that cannot be read is told as a directory that cannot be asked: the same answer, audit line and use of what is kept.
 	c := ldapauth.Config{
-		CA: ca, URL: l.URL, StartTLS: l.StartTLS, CAFile: l.CAFile, ServerName: l.ServerName, BindDN: l.BindDN, BindPassword: os.Getenv(l.PasswordEnv),
+		BindError: err,
+		CA:        ca, URL: l.URL, StartTLS: l.StartTLS, CAFile: l.CAFile, ServerName: l.ServerName, BindDN: l.BindDN, BindPassword: password,
 		UserBase: l.UserBase, UserFilter: l.UserFilter, GroupBase: l.GroupBase, GroupFilter: l.GroupFilter, GroupName: l.GroupName,
 	}
 	if c.GroupFilter == "" {
